@@ -10,7 +10,7 @@ Verificação executada de ponta a ponta na base importada da Sprint 3: suite de
 |---|---|---|
 | `pip install -r requirements.txt` | ⚠️ quebra a suite | passlib 1.7.4 × bcrypt ≥ 4.1 incompatíveis (ver B1) |
 | `pytest tests/` | ✅ 21/21 com fix | 13 falham sem fix, 51 warnings |
-| ETL do zero (clone limpo) | ✅ | schema + seed + 1000 registros + features + scaler |
+| ETL do zero (clone limpo) | ✅ | schema + seed + 1000 registros + features + scaler — **só roda com `cwd=src/data`** (imports planos, ver B4) |
 | ETL re-executado sobre base existente | 🔴 insere 0 registros e reporta `[OK]` | ver B2 |
 | Boot da API | ✅ | via `uvicorn start_api:app` |
 | Simulador + POST telemetria | ✅ | com URL corrigida (ver B3) |
@@ -39,6 +39,8 @@ Verificação executada de ponta a ponta na base importada da Sprint 3: suite de
 - **B7 — `src/data/readme.md` defasado.** Diz "Scripts a implementar na Sprint 2" para scripts que existem e rodam. Atualizar na #9 (documentação).
 - **B8 — `start_api.py` não sobe servidor sozinho.** É só um import (`__all__ = ["app"]`); rodar `python start_api.py` não faz nada (confirmado: processo sai na hora). README final deve padronizar `uvicorn start_api:app --reload`. Na #9.
 - **B9 — 51 warnings na suite** (passlib deprecações etc.). Baixa prioridade; limpar na #8 quando a suite crescer.
+- **B10 — Secret JWT com fallback de desenvolvimento.** `src/security/auth.py:16-25`: sem `JWT_SECRET_KEY` no ambiente, o token é assinado com `agrorisk-dev-secret-change-me-32b` (apenas um `RuntimeWarning`). A API sobe e autentica normalmente com o secret padrão — em "condição de uso" o sistema opera com chave conhecida publicamente. Na #6: falhar o boot sem a variável (ou gerar secret local persistido em `.env`).
+- **B11 — Dois scores com semânticas distintas expostos na mesma resposta.** `src/api/telemetria_service.py:108-112` calcula `score_risco` contínuo (heurística `score_regra`, 0-100) e, em paralelo, `score_risco_predito` **fixo por classe** (via modelo, seção 2). O mesmo payload devolve `81 (Crítico)` de regra e `63 (Alto)` do modelo para o mesmo registro — níveis diferentes para o mesmo evento, sem explicação. A #4 deve reconciliar: score do modelo contínuo derivado das probabilidades (mesma escala 0-100 da regra), com o papel de cada um documentado.
 
 ## 4. Pontos fortes confirmados (manter — tutor elogiou)
 
@@ -48,7 +50,14 @@ Simulador autenticado em fluxo contínuo; contrato Pydantic validado; RF carrega
 
 - **#2 (REFACT)**: B1 (bcrypt), B3 (URL simulador), B4 (imports ETL) — todos são "fluxo estável e reproduzível".
 - **#3 (ETL/BANCO)**: B2 é o achado mais grave (perda silenciosa de dados); B5, B6.
-- **#4 (ML)**: score contínuo + fatores reais já têm base pronta (probabilidades persistidas).
-- **#9 (ENTREGA)**: B5/B7/B8 (instruções de execução precisam do passo ETL).
+- **#4 (ML)**: score contínuo + fatores reais já têm base pronta (probabilidades persistidas); B11 (reconciliar score de regra × score do modelo).
+- **#6 (SEGURANÇA)**: B10 (secret JWT com fallback de dev).
+- **#8 (MVP)**: B9 (warnings).
+- **#9 (ENTREGA)**: B5/B7/B8 — instruções de execução precisam do passo ETL obrigatório (`cd src/data && python pipeline.py`) antes do `uvicorn start_api:app`, já que `sompo.db` não é versionado.
 
 A ordem de execução #1 → #2 → ... se mantém válida.
+
+## 6. Notas de auditoria
+
+- O `sompo.db` local (não rastreado) foi tocado durante a auditoria: o simulador inseriu 3 registros de telemetria (ids 1014-1016) e 2 alertas (ids 8-9) via API. Sem impacto no repositório; removíveis com um re-run do ETL sobre base zerada, se desejado.
+- O simulador não aborta o lote ao receber 403 de RBAC — imprime `ERRO HTTP` por registro e continua (comportamento observado com `--role operador`).
