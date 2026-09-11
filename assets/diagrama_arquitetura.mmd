@@ -1,0 +1,90 @@
+%% AgroRisk AI - Arquitetura Sprint 3 (Fase 5)
+%% Reflete o pipeline integrado: simulacao -> ETL -> FastAPI -> SQLite -> ML -> dashboard, com seguranca JWT/RBAC/auditoria.
+flowchart TB
+    subgraph S1["1 - Simulacao de Dados"]
+        GEN["generate_dataset.py<br/>simulador de sensores e telemetria"]
+        RAW["data/raw/dataset_simulado.csv<br/>1000 registros"]
+        GEN --> RAW
+    end
+
+    subgraph S2["2 - ETL / Feature Engineering"]
+        FE["feature_engineering.py<br/>pandas - features de risco + MinMaxScaler"]
+        ART["scaler.pkl · label_encoders.pkl"]
+        PROC["data/processed/features.csv"]
+        LOAD["load_to_sql.py<br/>ingestao no banco"]
+        FE --> ART
+        FE --> PROC --> LOAD
+    end
+
+    subgraph S3["3 - Backend FastAPI"]
+        SIM["simulador_telemetria.py<br/>POST /login -> JWT -> POST /telemetria"]
+        MAIN["main.py<br/>lifespan: RiskPredictor singleton"]
+        ROUTES["routes.py<br/>login · telemetria · equipamentos · alertas"]
+        SVC["telemetria_service.py<br/>features -> score -> predicao -> alerta"]
+    end
+
+    subgraph S4["4 - Persistencia SQLite"]
+        DB[("7 tabelas: equipamentos · telemetria · scores_modelo · alertas · usuarios · auditoria · regras_risco + 4 views")]
+    end
+
+    subgraph S5["5 - Inteligencia scikit-learn"]
+        TRAIN["02_modelagem.ipynb<br/>treino Random Forest (cv k=5)"]
+        MODEL["models/risk_model.pkl"]
+        EVAL["03_avaliacao.ipynb<br/>matriz de confusao · F1 · feature importance"]
+        PRED["predictor.py<br/>inferencia (singleton na API)"]
+        TRAIN --> MODEL --> PRED
+        TRAIN --> EVAL
+    end
+
+    subgraph S6["6 - Seguranca"]
+        AUTH["auth.py<br/>JWT HS256 · bcrypt · get_current_user"]
+        RBAC["rbac.py<br/>require_operador_or_gestor"]
+        AUDIT["audit_logger.py<br/>tabela auditoria"]
+    end
+
+    subgraph S7["7 - Visualizacao Streamlit"]
+        APP["app.py<br/>login JWT · visoes por papel do token<br/>mapa · alertas · historico · exportacao"]
+    end
+
+    subgraph S8["8 - Usuarios"]
+        U1["Operador"]
+        U2["Gestor de Frota"]
+        U3["Analista da Seguradora"]
+    end
+
+    RAW --> FE
+    LOAD --> DB
+    SIM -->|POST /login| ROUTES
+    SIM -->|POST /telemetria| ROUTES
+    MAIN --> ROUTES
+    ROUTES --> SVC
+    SVC --> DB
+    SVC --> PRED
+    PRED --> DB
+    DB -->|GET /telemetria JWT| APP
+    DB -->|GET /alertas JWT| APP
+    DB -->|GET /equipamentos JWT| APP
+    AUTH -.-> ROUTES
+    RBAC -.-> ROUTES
+    AUDIT -.-> DB
+    APP --> U1
+    APP --> U2
+    APP --> U3
+
+    classDef sim fill:#7a1fa2,stroke:#fff,color:#fff
+    classDef etl fill:#1f6feb,stroke:#fff,color:#fff
+    classDef backend fill:#1f6feb,stroke:#fff,color:#fff
+    classDef db fill:#0e8a6b,stroke:#fff,color:#fff
+    classDef ml fill:#d63384,stroke:#fff,color:#fff
+    classDef sec fill:#b8860b,stroke:#fff,color:#fff
+    classDef viz fill:#e6007e,stroke:#fff,color:#fff
+    classDef user fill:#444c5c,stroke:#fff,color:#fff
+
+    class GEN,RAW sim
+    class FE,ART,PROC,LOAD etl
+    class SIM,MAIN,ROUTES,SVC backend
+    class DB db
+    class TRAIN,MODEL,EVAL,PRED ml
+    class AUTH,RBAC,AUDIT sec
+    class APP viz
+    class U1,U2,U3 user

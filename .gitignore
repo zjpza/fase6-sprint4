@@ -1,0 +1,49 @@
+# Ambiente virtual
+venv/
+.env/
+.env
+
+# Banco de dados local (gerado em tempo de execução)
+*.db
+*.sqlite
+*.sqlite3
+
+# Modelos e artefatos grandes (podem ser gerados)
+# Descomente a linha abaixo se quiser ignorar modelos treinados no controle de versão.
+# *.pkl
+# *.joblib
+
+# Dados processados e brutos (podem ser regenerados)
+data/raw/
+data/processed/
+
+# Banco de dados local gerado em runtime (mantemos sompo.db inicial populado no repo)
+# Para ignorar o banco, descomente a linha abaixo.
+# sompo.db
+sompo_runtime.db
+
+# Logs de execução
+logs/
+*.log
+
+# Logs
+*.log
+logs/
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# Streamlit
+.streamlit/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
