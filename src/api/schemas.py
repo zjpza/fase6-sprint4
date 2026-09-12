@@ -81,6 +81,10 @@ class AlertaResponse(BaseModel):
     nivel_risco: str
     score_risco: int
     mensagem: str
+    tipo_alerta: str | None = Field(
+        None, description="Preventivo (Alto) ou Crítico — o dashboard usa para separar a leitura."
+    )
+    lido: int | None = Field(None, description="0 = não lido pelo operador, 1 = lido.")
 
 
 class LoginInput(BaseModel):

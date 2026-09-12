@@ -1,26 +1,36 @@
 """
 AgroRisk AI - Dashboard de Risco Operacional em Frotas Agricolas
-FIAP + Sompo Seguros | Sprint 3 - Fase 5
+FIAP + Sompo Seguros | Sprint 4 - Fase 6
 
 Interface visual que consome a API REST (FastAPI) e apresenta o nivel de
-risco por equipamento/regiao, alertas preventivos, evolucao temporal e a
-predicao do modelo de ML. Visoes diferenciadas por persona, derivadas do
-papel do usuario autenticado via JWT:
-  - Operador        -> foco em 1 equipamento + alertas simples (US-01)
-  - Gestor de Frota -> overview da frota, mapa e tendencias (US-04, US-05)
-  - Analista        -> historico auditavel de alertas + exportacao (US-07)
+risco por equipamento/regiao, alertas preventivos, tendencias por regiao e
+tipo de operacao, a predicao do modelo de ML (score continuo + fatores) e a
+trilha de auditoria. Visoes diferenciadas por persona, derivadas do papel do
+usuario autenticado via JWT:
+  - Operador        -> foco em 1 equipamento + alerta com os fatores que pesaram (US-01)
+  - Gestor de Frota -> overview da frota, mapa, tendencias e criterios de risco (US-04, US-05)
+  - Analista        -> historico auditavel de alertas + trilha de decisoes + exportacao (US-07)
 
 Executar:  streamlit run src/dashboard/app.py
 """
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
 import httpx
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+
+# Reaproveita a definição de faixas do domínio (fonte única do nível de risco).
+SRC = Path(__file__).resolve().parents[1]
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from ml.features import FAIXAS_NIVEL  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # Configuracao geral
@@ -29,6 +39,13 @@ API_BASE_URL = os.getenv("DASHBOARD_API_URL", "http://127.0.0.1:8000/api/v1")
 
 # Teto do parâmetro `limit` aceito por GET /api/v1/telemetria (validação da issue #2).
 LIMITE_HISTORICO = 1000
+
+# Usuários semeados em `src/sql/02_seed_data.sql`, usados na demonstração e nos prints.
+USUARIOS_DEMO = {
+    "operador": {"nome": "Carlos", "email": "carlos@agrorisk.local", "senha": "operador123"},
+    "gestor": {"nome": "Fernanda", "email": "fernanda@agrorisk.local", "senha": "gestor123"},
+    "analista": {"nome": "Ricardo", "email": "ricardo@sompo.local", "senha": "analista123"},
+}
 
 CORES_RISCO = {
     "Baixo": "#2ecc71",
@@ -185,7 +202,7 @@ def carregar_equipamentos() -> pd.DataFrame:
 
 
 def carregar_alertas() -> pd.DataFrame:
-    """Busca alertas via API (GET /api/v1/alertas)."""
+    """Busca os alertas emitidos via API (GET /api/v1/alertas)."""
     resp = httpx.get(
         f"{API_BASE_URL}/alertas",
         headers=_auth_headers(),
@@ -193,6 +210,21 @@ def carregar_alertas() -> pd.DataFrame:
     )
     resp.raise_for_status()
     return pd.DataFrame(resp.json())
+
+
+def carregar_auditoria(limite: int = 200) -> pd.DataFrame:
+    """Busca a trilha de auditoria via API (GET /api/v1/auditoria) — restrita a gestor/analista."""
+    resp = httpx.get(
+        f"{API_BASE_URL}/auditoria",
+        params={"limit": min(limite, LIMITE_HISTORICO)},
+        headers=_auth_headers(),
+        timeout=30,
+    )
+    resp.raise_for_status()
+    df = pd.DataFrame(resp.json())
+    if not df.empty:
+        df["data_hora"] = pd.to_datetime(df["data_hora"], format="mixed")
+    return df
 
 
 def ultima_leitura_por_equipamento(df: pd.DataFrame) -> pd.DataFrame:
@@ -249,14 +281,19 @@ def config_tabela_risco() -> dict:
 # Graficos
 # --------------------------------------------------------------------------- #
 def grafico_mapa(df_atual: pd.DataFrame) -> go.Figure:
-    fig = px.scatter_map(
+    """Distribuição geográfica da frota por nível de risco.
+
+    Usa `scatter_geo` (mapa embutido no Plotly) em vez de tiles de rua: renderiza sem
+    token/rede e aparece em print e em navegador sem WebGL — `scatter_map` depende de
+    tiles externos e de WebGL, que ficam em branco na captura de tela.
+    """
+    fig = px.scatter_geo(
         df_atual,
         lat="latitude",
         lon="longitude",
         color="nivel_risco",
         size="score_risco",
-        size_max=22,
-        zoom=3.4,
+        size_max=20,
         hover_name="id_equipamento",
         hover_data={
             "tipo_equipamento": True,
@@ -269,7 +306,17 @@ def grafico_mapa(df_atual: pd.DataFrame) -> go.Figure:
         labels=ROTULOS,
         color_discrete_map=CORES_RISCO,
         category_orders={"nivel_risco": ORDEM_RISCO},
-        map_style="carto-darkmatter",
+        projection="natural earth",
+    )
+    fig.update_geos(
+        scope="south america",
+        showcountries=True,
+        countrycolor="#3b4252",
+        landcolor="#1c2128",
+        oceancolor="#0e1117",
+        showocean=True,
+        showcoastlines=True,
+        coastlinecolor="#3b4252",
     )
     fig.update_layout(
         margin=dict(l=0, r=0, t=10, b=0),
@@ -327,6 +374,68 @@ def grafico_evolucao(df: pd.DataFrame) -> go.Figure:
 # --------------------------------------------------------------------------- #
 # Visoes por persona
 # --------------------------------------------------------------------------- #
+def grafico_tendencia_por_dimensao(df: pd.DataFrame, dimensao: str) -> go.Figure:
+    """Score médio por dia, separado por região (UF) ou tipo de operação."""
+    serie = df.copy()
+    serie["dia"] = pd.to_datetime(serie["data_hora"]).dt.date
+    agrupado = (
+        serie.groupby(["dia", dimensao], as_index=False)["score_risco"].mean()
+    )
+    fig = px.line(
+        agrupado,
+        x="dia",
+        y="score_risco",
+        color=dimensao,
+        labels={**ROTULOS, "score_risco": "Score médio"},
+        markers=True,
+    )
+    fig.update_layout(
+        height=320, margin=dict(l=0, r=0, t=10, b=0),
+        xaxis_title="", yaxis_title="Score médio",
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font_color="#e6e6e6", legend_title_text="",
+    )
+    return fig
+
+
+def grafico_media_por_dimensao(df_atual: pd.DataFrame, dimensao: str) -> go.Figure:
+    """Score médio atual por região (UF) ou por tipo de operação."""
+    agrupado = (
+        df_atual.groupby(dimensao, as_index=False)["score_risco"]
+        .mean()
+        .sort_values("score_risco", ascending=False)
+    )
+    fig = px.bar(
+        agrupado,
+        x=dimensao,
+        y="score_risco",
+        labels={**ROTULOS, "score_risco": "Score médio"},
+        color="score_risco",
+        color_continuous_scale=["#2ecc71", "#f1c40f", "#e67e22", "#e74c3c"],
+    )
+    fig.update_layout(
+        height=320, margin=dict(l=0, r=0, t=10, b=0),
+        xaxis_title="", yaxis_title="Score médio", coloraxis_showscale=False,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font_color="#e6e6e6",
+    )
+    return fig
+
+
+def criterios_de_risco() -> None:
+    """Mostra, de forma legível, o critério que classifica risco e dispara alerta."""
+    faixas = " · ".join(
+        f"**{nivel}**: {minimo}-{maximo}" for nivel, (minimo, maximo) in FAIXAS_NIVEL.items()
+    )
+    st.caption(
+        "Critério de classificação (escala 0-100, igual para a regra e para o modelo): "
+        f"{faixas}. "
+        "Alerta preventivo é emitido quando o nível é **Alto** ou **Crítico**; "
+        "o alerta do modelo aparece separado (`Risco (ML)`) do alerta da regra (`Risco (regra)`) "
+        "para o operador ver quando os dois discordam."
+    )
+
+
 def visao_gestor(df: pd.DataFrame) -> None:
     st.caption(
         "Visão **Gestor de Frota** — panorama de todos os equipamentos, "
@@ -356,6 +465,20 @@ def visao_gestor(df: pd.DataFrame) -> None:
     with col_b:
         st.subheader("📈 Evolução do risco médio")
         st.plotly_chart(grafico_evolucao(df), use_container_width=True, config=PLOT_CONFIG)
+
+    col_c, col_d = st.columns(2)
+    with col_c:
+        st.subheader("🗺️ Tendência por região")
+        st.plotly_chart(
+            grafico_tendencia_por_dimensao(df, "estado_uf"), use_container_width=True, config=PLOT_CONFIG
+        )
+    with col_d:
+        st.subheader("🚧 Score médio por tipo de operação")
+        st.plotly_chart(
+            grafico_media_por_dimensao(df, "tipo_operacao"), use_container_width=True, config=PLOT_CONFIG
+        )
+
+    criterios_de_risco()
 
     st.divider()
     st.subheader("🚜 Equipamentos da frota")
@@ -447,6 +570,7 @@ def visao_operador(df: pd.DataFrame) -> None:
         font_color="#e6e6e6",
     )
     st.plotly_chart(fig, use_container_width=True, config=PLOT_CONFIG)
+    criterios_de_risco()
 
 
 def visao_analista() -> None:
@@ -483,12 +607,67 @@ def visao_analista() -> None:
         mime="text/csv",
     )
 
+    st.divider()
+    st.subheader("🔎 Trilha de auditoria")
+    st.caption(
+        "Quem acessou, quando e **o que o sistema decidiu** — cada telemetria processada deixa "
+        "registro com score da regra, score do modelo, alerta e fatores que pesaram."
+    )
+    trilha = carregar_auditoria()
+    if trilha.empty:
+        st.info("Nenhum evento registrado.")
+        return
+
+    decisoes = trilha[trilha["acao"] == "decisao_risco"]
+    t1, t2, t3 = st.columns(3)
+    t1.metric("Eventos registrados", len(trilha))
+    t2.metric("Decisões de risco", len(decisoes))
+    t3.metric("Usuários distintos", trilha["usuario"].nunique())
+
+    colunas = ["data_hora", "usuario", "acao", "id_equipamento", "detalhes", "ip_origem"]
+    legivel = trilha[colunas].rename(
+        columns={
+            "data_hora": "Data/Hora", "usuario": "Usuário", "acao": "Ação",
+            "id_equipamento": "Equipamento", "detalhes": "Detalhes", "ip_origem": "IP",
+        }
+    )
+    st.dataframe(legivel, use_container_width=True, hide_index=True)
+    st.download_button(
+        "⬇️ Exportar trilha (CSV)",
+        legivel.to_csv(index=False).encode("utf-8"),
+        file_name="trilha_auditoria_agrorisk.csv",
+        mime="text/csv",
+    )
+
 
 # --------------------------------------------------------------------------- #
 # Tela de login
 # --------------------------------------------------------------------------- #
+def entrar_na_sessao(dados: dict) -> None:
+    """Guarda os dados do usuário autenticado na sessão do Streamlit."""
+    st.session_state["token"] = dados["token"]
+    st.session_state["id_usuario"] = dados["id_usuario"]
+    st.session_state["nome"] = dados["nome"]
+    st.session_state["role"] = dados["role"]
+    st.session_state["id_equipamento_acesso"] = dados["id_equipamento_acesso"]
+
+
 def tela_login() -> None:
-    """Exibe o formulário de login no sidebar e o hero na área principal."""
+    """Exibe o formulário de login no sidebar e o hero na área principal.
+
+    Com ``DASHBOARD_DEMO_LOGIN`` (operador/gestor/analista), a sessão entra direto com o
+    usuário de demonstração correspondente — usado para capturar prints e gravar a
+    demonstração. A autenticação continua sendo feita pela API; sem a variável, o
+    formulário é o caminho normal.
+    """
+    demo = USUARIOS_DEMO.get(os.getenv("DASHBOARD_DEMO_LOGIN", "").strip().lower())
+    if demo:
+        with st.spinner(f"Entrando como {demo['nome']} (usuário de demonstração)..."):
+            dados = fazer_login(demo["email"], demo["senha"])
+        if dados:
+            entrar_na_sessao(dados)
+            st.rerun()
+
     st.markdown(
         """
         <div class="hero">
@@ -510,18 +689,13 @@ def tela_login() -> None:
             with st.spinner("Autenticando..."):
                 dados = fazer_login(email, senha)
             if dados:
-                st.session_state["token"] = dados["token"]
-                st.session_state["id_usuario"] = dados["id_usuario"]
-                st.session_state["nome"] = dados["nome"]
-                st.session_state["role"] = dados["role"]
-                st.session_state["id_equipamento_acesso"] = dados["id_equipamento_acesso"]
+                entrar_na_sessao(dados)
                 st.rerun()
 
     st.sidebar.markdown("---")
     st.sidebar.caption("**Usuários de demonstração:**")
-    st.sidebar.caption("Carlos · `carlos@agrorisk.local` / `operador123`")
-    st.sidebar.caption("Fernanda · `fernanda@agrorisk.local` / `gestor123`")
-    st.sidebar.caption("Ricardo · `ricardo@sompo.local` / `analista123`")
+    for credencial in USUARIOS_DEMO.values():
+        st.sidebar.caption(f"{credencial['nome']} · `{credencial['email']}` / `{credencial['senha']}`")
 
 
 # --------------------------------------------------------------------------- #
