@@ -183,7 +183,8 @@ def listar_telemetria(
                 t.velocidade_operacao_kmh, t.carga_pct, t.nivel_combustivel_pct,
                 t.historico_incidentes, t.score_risco, t.nivel_risco, t.alerta_gerado,
                 e.tipo_equipamento, e.estado_uf,
-                sm.nivel_risco_predito, sm.score_risco_predito, sm.modelo_utilizado
+                sm.nivel_risco_predito, sm.score_risco_predito, sm.modelo_utilizado, 
+                sm.fatores_principais
         FROM telemetria t
         LEFT JOIN equipamentos e ON t.id_equipamento = e.id_equipamento
         LEFT JOIN scores_modelo sm ON t.id_registro = sm.id_registro

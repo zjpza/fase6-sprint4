@@ -92,10 +92,18 @@ def _inserir_score_modelo(conn: sqlite3.Connection, pred: dict) -> None:
     )
 
 
-def _inserir_alerta(conn: sqlite3.Connection, id_registro: int, id_equipamento: str, nivel: str, score: int) -> None:
+def _inserir_alerta(
+    conn: sqlite3.Connection,
+    id_registro: int,
+    id_equipamento: str,
+    nivel: str,
+    score: int,
+    fatores: str | list[str] | None = None,
+) -> None:
+    """Grava o alerta de risco Alto/Crítico com os fatores que pesaram na predição."""
     if nivel not in ("Alto", "Crítico"):
         return
-    mensagem = recomendar(nivel)
+    mensagem = recomendar(nivel, fatores)
     tipo_alerta = "Crítico" if nivel == "Crítico" else "Preventivo"
     cursor = conn.cursor()
     cursor.execute(
@@ -127,7 +135,14 @@ def processar_telemetria(conn: sqlite3.Connection, dados: dict, predictor: RiskP
     pred["id_equipamento"] = row["id_equipamento"]
 
     _inserir_score_modelo(conn, pred)
-    _inserir_alerta(conn, id_registro, row["id_equipamento"], pred["nivel_risco_predito"], pred["score_risco_predito"])
+    _inserir_alerta(
+        conn,
+        id_registro,
+        row["id_equipamento"],
+        pred["nivel_risco_predito"],
+        pred["score_risco_predito"],
+        pred["fatores_principais"],
+    )
     conn.commit()
 
     fatores = json.loads(pred["fatores_principais"])

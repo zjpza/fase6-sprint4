@@ -34,14 +34,26 @@ class TelemetriaInput(BaseModel):
 class TelemetriaResponse(BaseModel):
     id_registro: int
     id_equipamento: str
-    score_risco: int
-    nivel_risco: str
+    score_risco: int = Field(
+        ...,
+        description="Score 0-100 da regra explícita do domínio (heurística determinística, auditável linha a linha).",
+    )
+    nivel_risco: str = Field(..., description="Nível derivado do score da regra (Baixo/Médio/Alto/Crítico).")
     alerta_gerado: bool
-    score_risco_predito: int
-    nivel_risco_predito: str
+    score_risco_predito: int = Field(
+        ...,
+        description=(
+            "Score 0-100 do modelo Random Forest, contínuo: média das faixas ponderada pelas "
+            "probabilidades previstas. Mesma escala do score_risco, então os dois são comparáveis."
+        ),
+    )
+    nivel_risco_predito: str = Field(..., description="Classe prevista pelo modelo (argumento de maior probabilidade).")
     alerta_predito: bool
     recomendacao: str
-    fatores_principais: list[str]
+    fatores_principais: list[str] = Field(
+        ...,
+        description="Variáveis que mais mudam a probabilidade do nível previsto neste registro (ordem de contribuição).",
+    )
     data_hora: datetime
 
 
@@ -109,3 +121,7 @@ class TelemetriaHistoricoResponse(BaseModel):
     score_risco_predito: int | None = None
     nivel_risco_predito: str | None = None
     modelo_utilizado: str | None = None
+    fatores_principais: str | None = Field(
+        None,
+        description="JSON com as variáveis que mais pesaram na predição deste registro.",
+    )

@@ -228,3 +228,14 @@ def test_telemetria_limit_valido_mantem_paginacao(client):
     resp = client.get("/api/v1/telemetria?limit=2", headers=_auth(token))
     assert resp.status_code == 200
     assert len(resp.json()) == 2
+
+
+def test_telemetria_limit_no_teto_do_dashboard(client):
+    """O dashboard pede o histórico no teto do parâmetro: esse limite precisa continuar aceito."""
+    token = _login(client, *GESTOR)
+    _post_telemetria(client, token, TELEMETRIA_PAYLOAD)
+
+    resp = client.get("/api/v1/telemetria?limit=1000", headers=_auth(token))
+
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1

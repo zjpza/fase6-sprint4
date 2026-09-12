@@ -1,13 +1,18 @@
-"""Testes das funções puras de features e score (fonte única: ml.features)."""
+"""Testes das funções puras de features/score (fonte única: ml.features) e da inferência."""
 from __future__ import annotations
+
+import json
 
 import pandas as pd
 import pytest
 
 from ml.features import (
+    FAIXAS_NIVEL as _FAIXAS_NIVEL,
+    REPRESENTANTE_NIVEL as _REPRESENTANTE_NIVEL,
     calcular_features as _calcular_features,
     classificar_risco as _classificar_risco,
     faixa_proximidade as _faixa_proximidade,
+    score_continuo as _score_continuo,
     score_regra as _score_regra,
 )
 
@@ -31,6 +36,23 @@ def test_classificar_risco():
     assert _classificar_risco(75) == "Alto"
     assert _classificar_risco(76) == "Crítico"
     assert _classificar_risco(100) == "Crítico"
+
+
+def test_score_continuo_pondera_as_probabilidades():
+    """O score deixa de ser fixo por classe: a confiança do modelo muda o valor dentro da mesma faixa."""
+    assert _score_continuo({"Alto": 1.0}) == pytest.approx(_REPRESENTANTE_NIVEL["Alto"])
+    assert _score_continuo({"Crítico": 1.0}) > _score_continuo({"Alto": 1.0}) > _score_continuo({"Médio": 1.0})
+
+    forte = _score_continuo({"Alto": 0.9, "Médio": 0.1})
+    fraca = _score_continuo({"Alto": 0.5, "Médio": 0.5})
+    assert forte != fraca
+    assert _FAIXAS_NIVEL["Alto"][0] <= forte <= _FAIXAS_NIVEL["Alto"][1]
+
+
+def test_representante_de_cada_nivel_fica_dentro_da_propria_faixa():
+    """Score contínuo e nível predito falam a mesma língua: o valor de cada nível mora na sua banda."""
+    for nivel, (minimo, maximo) in _FAIXAS_NIVEL.items():
+        assert minimo <= _REPRESENTANTE_NIVEL[nivel] <= maximo
 
 
 def _payload_alto():
@@ -121,3 +143,105 @@ def test_validar_features_mensagem_de_erro_clara():
     df = pd.DataFrame({"score_risco": [150], "diff_score": [0]})
     with pytest.raises(ValueError, match="score_risco"):
         validar_features(df)
+
+
+# --- Sprint 4 (#4 ML): score contínuo e fatores por contribuição real ---
+
+# Linha real da base (EQ-GO-0006, 841 m da água) cujo risco vem de velocidade, desgaste e
+# umidade do solo: serve para provar que a distância até a água não é listada como fator
+# só por ser um número grande.
+TELEMETRIA_LONGE_DA_AGUA = {
+    "id_equipamento": "EQ-GO-0006",
+    "tipo_operacao": "Campo",
+    "latitude": -16.3364,
+    "longitude": -49.6161,
+    "proximidade_agua_m": 841,
+    "precipitacao_mm": 4.5,
+    "umidade_solo_pct": 48.8,
+    "tipo_solo": "Argiloso",
+    "declividade_graus": 11.5,
+    "temperatura_c": 32.9,
+    "velocidade_vento_kmh": 33.6,
+    "visibilidade_m": 4544,
+    "horas_uso_equipamento": 6054,
+    "dias_ultima_manutencao": 40,
+    "velocidade_operacao_kmh": 10.5,
+    "carga_pct": 44.4,
+    "nivel_combustivel_pct": 97.1,
+    "historico_incidentes": 3,
+}
+
+TELEMETRIA_LONGE_DA_AGUA_COM_DESGASTE = {
+    **TELEMETRIA_LONGE_DA_AGUA,
+    "id_equipamento": "EQ-GO-0006",
+    "latitude": -16.313,
+    "longitude": -49.765,
+    "proximidade_agua_m": 2316,
+    "precipitacao_mm": 14.1,
+    "umidade_solo_pct": 24.2,
+    "tipo_solo": "Arenoso",
+    "declividade_graus": 0.7,
+    "temperatura_c": 31.8,
+    "velocidade_vento_kmh": 54.3,
+    "visibilidade_m": 3806,
+    "horas_uso_equipamento": 6035,
+    "dias_ultima_manutencao": 113,
+    "velocidade_operacao_kmh": 8.3,
+    "carga_pct": 35.7,
+    "nivel_combustivel_pct": 43.3,
+    "historico_incidentes": 2,
+}
+
+
+def _predizer(*telemetrias: dict) -> list[dict]:
+    """Prediz como a API prediz: telemetria crua → features derivadas → modelo."""
+    from ml.predictor import RiskPredictor
+
+    df = pd.DataFrame([_calcular_features(t) for t in telemetrias])
+    return RiskPredictor().predict(df).to_dict(orient="records")
+
+
+def test_fatores_mostram_contribuicao_e_nao_valor_absoluto():
+    """Distância até a água deixa de aparecer como fator quando não é ela que move a predição."""
+    predicao = _predizer(TELEMETRIA_LONGE_DA_AGUA)[0]
+    fatores = json.loads(predicao["fatores_principais"])
+
+    assert fatores, "a predição precisa indicar o que pesou"
+    assert "proximidade_agua_m" not in fatores
+    assert "faixa_proximidade_encoded" not in fatores
+    assert "velocidade_operacao_kmh" in fatores or "risco_manutencao" in fatores
+
+
+def test_fatores_mudam_conforme_o_que_pesa_no_registro():
+    """Duas linhas igualmente longe da água: a proximidade é fator onde influencia, e não é onde não influencia."""
+    sem_peso = json.loads(_predizer(TELEMETRIA_LONGE_DA_AGUA)[0]["fatores_principais"])
+    com_peso = json.loads(_predizer(TELEMETRIA_LONGE_DA_AGUA_COM_DESGASTE)[0]["fatores_principais"])
+
+    assert "proximidade_agua_m" not in sem_peso, "valor grande por si só não faz a variável ser fator"
+    assert "proximidade_agua_m" in com_peso
+    assert sem_peso != com_peso
+
+
+def test_score_do_modelo_e_continuo_dentro_do_mesmo_nivel():
+    """Registros no mesmo nível deixam de receber o mesmo score fixo da Sprint 3 (Baixo=12 ... Crítico=88)."""
+    telemetrias = [
+        dict(
+            TELEMETRIA_LONGE_DA_AGUA,
+            dias_ultima_manutencao=dias,
+            historico_incidentes=incidentes,
+        )
+        for dias, incidentes in [(5, 0), (20, 0), (40, 0), (60, 1), (80, 1), (95, 2), (110, 3), (120, 5)]
+    ]
+    predicoes = _predizer(*telemetrias)
+    scores = [predicao["score_risco_predito"] for predicao in predicoes]
+
+    assert len(set(scores)) > 4, "o mapa fixo por classe só produzia 4 valores"
+
+    por_nivel: dict[str, set[int]] = {}
+    for predicao in predicoes:
+        por_nivel.setdefault(predicao["nivel_risco_predito"], set()).add(predicao["score_risco_predito"])
+    assert any(len(valores) > 1 for valores in por_nivel.values()), "mesmo nível com scores distintos"
+
+    for predicao in predicoes:
+        minimo, maximo = _FAIXAS_NIVEL[predicao["nivel_risco_predito"]]
+        assert minimo <= predicao["score_risco_predito"] <= maximo

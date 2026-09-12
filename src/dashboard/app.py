@@ -14,6 +14,7 @@ Executar:  streamlit run src/dashboard/app.py
 """
 from __future__ import annotations
 
+import json
 import os
 
 import httpx
@@ -26,6 +27,9 @@ import streamlit as st
 # Configuracao geral
 # --------------------------------------------------------------------------- #
 API_BASE_URL = os.getenv("DASHBOARD_API_URL", "http://127.0.0.1:8000/api/v1")
+
+# Teto do parâmetro `limit` aceito por GET /api/v1/telemetria (validação da issue #2).
+LIMITE_HISTORICO = 1000
 
 CORES_RISCO = {
     "Baixo": "#2ecc71",
@@ -41,6 +45,7 @@ ROTULOS = {
     "tipo_equipamento": "Tipo",
     "estado_uf": "Região",
     "score_risco": "Score de risco",
+    "score_risco_predito": "Score do modelo",
     "id_equipamento": "Equipamento",
     "latitude": "Latitude",
     "longitude": "Longitude",
@@ -150,10 +155,13 @@ def fazer_login(email: str, senha: str) -> dict | None:
 
 
 def carregar_telemetria() -> pd.DataFrame:
-    """Busca o histórico de telemetria via API (GET /api/v1/telemetria)."""
+    """Busca o histórico de telemetria via API (GET /api/v1/telemetria).
+
+    A API valida `limit` (1-1000 desde a issue #2): pedir acima disso devolve 422.
+    """
     resp = httpx.get(
         f"{API_BASE_URL}/telemetria",
-        params={"limit": 2000},
+        params={"limit": LIMITE_HISTORICO},
         headers=_auth_headers(),
         timeout=30,
     )
@@ -201,6 +209,18 @@ def ultima_leitura_por_equipamento(df: pd.DataFrame) -> pd.DataFrame:
 def pill(nivel: str) -> str:
     cor = CORES_RISCO.get(nivel, "#888")
     return f'<span class="pill" style="background:{cor}">{nivel}</span>'
+
+
+def _fatores_do_registro(registro: pd.Series) -> list[str]:
+    """Fatores da predição (JSON) daquele registro, tolerando linhas antigas sem predição."""
+    bruto = registro.get("fatores_principais")
+    if not isinstance(bruto, str) or not bruto.strip():
+        return []
+    try:
+        fatores = json.loads(bruto)
+    except json.JSONDecodeError:
+        return []
+    return [str(fator) for fator in fatores] if isinstance(fatores, list) else []
 
 
 def legenda_cores() -> None:
@@ -387,15 +407,30 @@ def visao_operador(df: pd.DataFrame) -> None:
     with c1:
         st.markdown("**Status atual**")
         st.markdown(pill(nivel), unsafe_allow_html=True)
-    c2.metric("Score de risco", int(atual["score_risco"]))
-    c3.metric("Predição do modelo", str(atual.get("nivel_risco_predito") or "—"))
+    score_modelo = atual.get("score_risco_predito")
+    c2.metric("Score da regra", int(atual["score_risco"]))
+    c3.metric(
+        f"Score do modelo ({atual.get('nivel_risco_predito') or '—'})",
+        int(score_modelo) if score_modelo is not None else "—",
+        delta=None if score_modelo is None else int(score_modelo) - int(atual["score_risco"]),
+        delta_color="off",
+        help="Mesma escala 0-100 da regra. A regra soma penalidades explícitas; o modelo "
+        "pondera as probabilidades do Random Forest. Divergência grande indica caso ambíguo.",
+    )
+
+    fatores = _fatores_do_registro(atual)
+    if fatores:
+        st.caption("Variáveis que mais pesaram na predição do modelo: " + ", ".join(f"`{f}`" for f in fatores))
 
     if nivel in ("Alto", "Crítico"):
+        # O texto cita o que realmente pesou no registro: o alerta antigo falava sempre de
+        # proximidade da água, mesmo quando ela não era a causa (mesma classe do B11).
+        causas = ", ".join(fatores) if fatores else "condições operacionais do registro"
         st.error(
-            f"🚨 ALERTA {nivel.upper()}: proximidade de água "
-            f"{int(atual['proximidade_agua_m'])} m e umidade do solo "
-            f"{atual['umidade_solo_pct']:.0f}%. Reduza a velocidade, evite "
-            "áreas alagadiças e acione o gestor antes de prosseguir."
+            f"🚨 ALERTA {nivel.upper()} para {equip}: risco {nivel.lower()} "
+            f"(score da regra {int(atual['score_risco'])}, score do modelo {score_modelo if score_modelo is not None else '—'}). "
+            f"Fatores que pesaram: {causas}. Reduza a velocidade, evite áreas alagadiças e "
+            "acione o gestor antes de prosseguir."
         )
     elif nivel == "Médio":
         st.warning("⚠️ Atenção moderada. Monitore as condições do solo e do clima.")
