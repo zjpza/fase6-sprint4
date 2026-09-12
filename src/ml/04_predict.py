@@ -1,67 +1,74 @@
-import sqlite3
-import pickle
-import pandas as pd
-import json
+"""Predição em lote sobre a telemetria do banco — demonstração sem passar pela API.
+
+Usa o mesmo `RiskPredictor` da API: score contínuo (média das faixas ponderada pelas
+probabilidades) e fatores por contribuição saem de uma implementação só, sem lógica
+de score duplicada neste script.
+
+Executar a partir da raiz do projeto:
+
+``python src/ml/04_predict.py``
+"""
+from __future__ import annotations
+
+import sys
 from datetime import datetime
+from pathlib import Path
 
-MODEL_PATH = 'src/ml/models/risk_model.pkl'
-DB_PATH    = 'sompo.db'
+import pandas as pd
 
-def main():
-    with open(MODEL_PATH, 'rb') as f:
-        artefato = pickle.load(f)
-    print(f"[OK] Modelo carregado: {artefato['model_name']}")
+SRC = Path(__file__).resolve().parents[1]
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
 
-    conn = sqlite3.connect(DB_PATH)
-    df   = pd.read_sql('SELECT * FROM telemetria', conn)
-    conn.close()
+from data.conexao import conectar  # noqa: E402
+from ml.predictor import RiskPredictor  # noqa: E402
 
-    features = artefato['features']
-    modelo   = artefato['model']
-    le       = artefato['label_encoder']
+ROOT = Path(__file__).resolve().parents[2]
+DB_PATH = ROOT / "sompo.db"
 
-    feats_ok = [f for f in features if f in df.columns]
-    X        = df[feats_ok].fillna(0)
-    y_pred   = modelo.predict(X)
-    labels   = le.inverse_transform(y_pred)
 
-    proba_list = modelo.predict_proba(X) if hasattr(modelo, 'predict_proba') else None
+def main() -> None:
+    with conectar(DB_PATH) as conn:
+        df = pd.read_sql("SELECT * FROM telemetria", conn)
+        if df.empty:
+            raise SystemExit("Telemetria vazia — rode o ETL (python src/data/pipeline.py) antes.")
 
-    # Como o modelo e de classificacao, o score predito e o ponto medio da
-    # faixa da classe prevista (Baixo 0-25, Medio 26-50, Alto 51-75, Critico 76-100).
-    SCORE_POR_NIVEL = {'Baixo': 12, 'Médio': 38, 'Alto': 63, 'Crítico': 88}
+        predictor = RiskPredictor()
+        predicoes = predictor.predict(df)
+        agora = datetime.now().isoformat()
 
-    conn   = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    agora  = datetime.now().isoformat()
+        registros = [
+            (
+                int(linha["id_registro"]),
+                str(linha["id_equipamento"]),
+                agora,
+                int(linha["score_risco_predito"]),
+                str(linha["nivel_risco_predito"]),
+                int(linha["alerta_predito"]),
+                str(linha["modelo_utilizado"]),
+                str(linha["probabilidades"]),
+                str(linha["fatores_principais"]),
+            )
+            for _, linha in predicoes.iterrows()
+        ]
 
-    # Idempotencia: limpa predicoes anteriores para nao duplicar ao reexecutar.
-    cursor.execute("DELETE FROM scores_modelo")
+        # Reexecutar reescreve as predições dos mesmos registros, sem acumular duplicatas.
+        ids = [registro[0] for registro in registros]
+        conn.executemany("DELETE FROM scores_modelo WHERE id_registro = ?", [(i,) for i in ids])
+        conn.executemany(
+            """
+            INSERT INTO scores_modelo
+                (id_registro, id_equipamento, data_hora_predicao, score_risco_predito,
+                 nivel_risco_predito, alerta_predito, modelo_utilizado, probabilidades, fatores_principais)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            registros,
+        )
+        conn.commit()
 
-    registros = []
-    for i, row in df.iterrows():
-        nivel      = labels[i]
-        id_reg     = int(row.get('id_registro', i))
-        id_equip   = str(row.get('id_equipamento', ''))
-        score      = SCORE_POR_NIVEL.get(nivel, 50)
-        alerta     = 1 if nivel in ('Alto', 'Crítico') else 0
-        proba_json = json.dumps({c: round(float(p), 4)
-                                 for c, p in zip(le.classes_, proba_list[i])}) if proba_list is not None else '{}'
-        registros.append((id_reg, id_equip, agora, score, nivel,
-                          alerta, artefato['model_name'], proba_json, ''))
+    print(f"[OK] {len(registros)} predições gravadas em scores_modelo ({predictor.model_name})")
+    print(predicoes["nivel_risco_predito"].value_counts().to_string())
 
-    cursor.executemany("""
-        INSERT INTO scores_modelo
-            (id_registro, id_equipamento, data_hora_predicao, score_risco_predito,
-             nivel_risco_predito, alerta_predito, modelo_utilizado, probabilidades, fatores_principais)
-        VALUES (?,?,?,?,?,?,?,?,?)
-    """, registros)
 
-    conn.commit()
-    conn.close()
-
-    print(f"[OK] {len(registros)} predicoes salvas!")
-    print(pd.Series(labels).value_counts().to_string())
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
