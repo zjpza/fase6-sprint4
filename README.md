@@ -164,7 +164,8 @@ fase6-sprint4/
 ├── docs/                              # Documentação técnica
 │   ├── auditoria-sprint4.md          # Diagnóstico da base importada (issue #1)
 │   ├── etl-consistencia.md           # Evidências de consistência do ETL (issue #3)
-│   └── ml-score-e-fatores.md         # Score contínuo e fatores do modelo (issue #4)
+│   ├── ml-score-e-fatores.md         # Score contínuo e fatores do modelo (issue #4)
+│   └── integracao-coleta.md          # Confiabilidade da coleta de telemetria (issue #5)
 └── assets/                            # Diagrama de arquitetura (Mermaid + PNG)
     ├── diagrama_arquitetura.mmd      # Fonte Mermaid editável
     └── diagrama_arquitetura.png      # Imagem renderizada
@@ -279,11 +280,18 @@ O `simulador_telemetria.py` envia registros de telemetria sintéticos em fluxo c
 python src/api/simulador_telemetria.py [opções]
 
 # Opções:
-#   --base-url   URL base da API (default: http://127.0.0.1:8000/api/v1; aceita com ou sem /api/v1)
-#   --n          Número de registros a enviar (default: 20)
-#   --interval   Intervalo entre envios em segundos (default: 2.0)
-#   --role       Papel para autenticação: operador ou gestor (default: gestor)
+#   --base-url     URL base da API (default: http://127.0.0.1:8000/api/v1; aceita com ou sem /api/v1)
+#   --n            Número de registros a enviar (default: 20)
+#   --interval     Intervalo entre envios em segundos (default: 2.0)
+#   --role         Papel para autenticação: operador ou gestor (default: gestor)
+#   --equipamento  Envia como se fosse deste equipamento (use com --role operador)
+#   --lote         Lote de coleta: muda para reenviar as mesmas medições como coleta nova
 ```
+
+O simulador reenvia cada registro até 3 vezes em falha transitória (timeout, conexão, 5xx),
+renova o token no 401 e termina com um resumo (`enviados | aceitos | já registrados | rejeitados |
+falhas`), retornando código 1 se algo não entrou. Sem `--lote`, reexecutar o mesmo comando é
+idempotente: as coletas já registradas voltam como 409 e nada é duplicado.
 
 Fluxo: POST `/login` → token JWT → POST `/telemetria` por registro → imprime score, nível, predição e alerta. Em caso de token expirado (401), re-autentica e tenta novamente.
 
@@ -339,7 +347,7 @@ python -m pytest tests/ -v
 |---------|-----------|
 | `tests/conftest.py` | Fixtures: banco SQLite temporário por teste, override de `get_db`, `TestClient` com `RiskPredictor` |
 | `tests/test_unit.py` | `faixa_proximidade`, `classificar_risco`, `score_regra`, `score_continuo` (ponderado pelas probabilidades), `_calcular_features`, inferência do modelo (fatores por contribuição e continuidade do score) |
-| `tests/test_api.py` | Login (200/401), `/me`, POST `/telemetria` (201/401/403/422), RBAC por papel, GET `/telemetria` com filtragem e validação de `limit`, `/equipamentos`, `/alertas`, `/health` |
+| `tests/test_api.py` | Login (200/401), `/me`, POST `/telemetria` (201/401/403/409/422), RBAC por papel, coleta reenviada sem duplicar, rajada com consistência de totais, payload malformado sem gravação parcial, GET `/telemetria` com filtragem e validação de `limit`, `/equipamentos`, `/alertas`, `/health` |
 | `tests/test_etl.py` | Carga idempotente (recarga não duplica nem insere 0), higienização por motivo (faltante, duplicado, domínio, faixa, incoerência), rastreabilidade `fonte`/`id_coleta`, migração de base legada |
 
 Os testes usam `TestClient` (FastAPI) em processo — não exigem API rodando. O banco é recriado em arquivo temporário a cada teste, garantindo isolamento.
