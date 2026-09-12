@@ -43,7 +43,7 @@ O **AgroRisk AI** é um sistema de análise preditiva de risco para equipamentos
 
 Nesta **Sprint 4 (Fase 6)**, o objetivo é **consolidar o MVP integrado na Sprint 3 e corrigir as lacunas técnicas apontadas no feedback da tutoria**. As 9 issues do repositório fecham o ciclo: auditoria da base importada, refatoração arquitetural, refinamento do ETL/banco, ajuste do modelo preditivo, validação da integração, consolidação da segurança, relatórios finais do dashboard, testes de ponta a ponta e entrega. O fluxo permanece o da Sprint 3 — telemetria entra, é persistida, pontuada pelo modelo e apresentada por persona — agora com score de risco contínuo, dados íntegros e evidências de validação.
 
-> **Estado atual:** MVP integrado em consolidação para a entrega final. Backend FastAPI com APIs REST, autenticação JWT + bcrypt, RBAC centralizado, auditoria com IP, pipeline ETL determinístico, modelo Random Forest integrado, simulador de telemetria em fluxo contínuo e dashboard Streamlit com visões por persona. As correções da Sprint 4 estão rastreadas nas issues [#1–#9](https://github.com/zjpza/fase6-sprint4/issues).
+> **Estado atual:** MVP integrado em consolidação para a entrega final. Backend FastAPI com APIs REST, autenticação JWT + bcrypt, RBAC centralizado, auditoria com IP, pipeline ETL determinístico e idempotente (dados sujos descartados com motivo e rastreabilidade até a fonte), modelo Random Forest integrado com **score contínuo** e fatores por contribuição real, simulador de telemetria em fluxo contínuo e dashboard Streamlit com visões por persona. As correções da Sprint 4 estão rastreadas nas issues [#1–#9](https://github.com/zjpza/fase6-sprint4/issues).
 
 ---
 
@@ -98,8 +98,8 @@ Camadas:
 1. **Entrada de dados**: `simulador_telemetria.py` gera registros sintéticos determinísticos (SEED=42) via `gerar_dataset` e envia em fluxo contínuo à API; `pipeline_client.py` demonstra o caso simples com um registro.
 2. **Backend orquestrador**: FastAPI que valida entradas (Pydantic), persiste em SQLite, aciona o modelo preditivo e registra auditoria.
 3. **Banco de dados**: SQLite relacional com tabelas de telemetria, equipamentos, scores_modelo, alertas, usuários (senhas bcrypt) e auditoria.
-4. **Modelo preditivo**: Random Forest treinado na Sprint 2, carregado uma vez na inicialização via `lifespan` (singleton) e reutilizado em todas as requisições.
-5. **Interface**: dashboard Streamlit que consome a API REST via JWT (login obrigatório). A visão é derivada do papel do usuário autenticado: Gestor de Frota vê mapa e frota completa, Operador vê apenas seu equipamento, Analista vê histórico auditável de alertas com exportação CSV.
+4. **Modelo preditivo**: Random Forest treinado na Sprint 2, carregado uma vez na inicialização via `lifespan` (singleton) e reutilizado em todas as requisições. Devolve score 0-100 contínuo (média das faixas ponderada pelas probabilidades) e os fatores que pesaram naquele registro — mesma escala do score da regra, então os dois são comparáveis.
+5. **Interface**: dashboard Streamlit que consome a API REST via JWT (login obrigatório). A visão é derivada do papel do usuário autenticado: Gestor de Frota vê mapa e frota completa, Operador vê apenas seu equipamento (com score da regra, score do modelo e os fatores que pesaram na predição), Analista vê histórico auditável de alertas com exportação CSV.
 6. **Segurança**: autenticação JWT com senhas bcrypt, RBAC centralizado em `rbac.py`, validação de entradas, triggers SQL de integridade e logs de auditoria.
 
 ---
@@ -142,7 +142,8 @@ fase6-sprint4/
 │   │   ├── 02_modelagem.ipynb         # Treinamento do modelo
 │   │   ├── 03_avaliacao.ipynb         # Avaliação e métricas
 │   │   ├── 04_predict.py              # Script de predição standalone
-│   │   └── relatorio_metricas.md      # Relatório de métricas do modelo
+│   │   ├── train_model.py             # Treino + avaliação + relatório de métricas (Sprint 4)
+│   │   └── relatorio_metricas.md      # Relatório de métricas do modelo final
 │   ├── sql/                           # Schema, views, triggers e seeds
 │   │   ├── 01_schema.sql              # Tabelas: equipamentos, telemetria, scores, alertas, usuarios
 │   │   ├── 02_seed_data.sql           # Seeds: equipamentos demo, usuários com hashes bcrypt
@@ -162,7 +163,8 @@ fase6-sprint4/
 │   └── test_etl.py                   # ETL: idempotência, higienização e rastreabilidade
 ├── docs/                              # Documentação técnica
 │   ├── auditoria-sprint4.md          # Diagnóstico da base importada (issue #1)
-│   └── etl-consistencia.md           # Evidências de consistência do ETL (issue #3)
+│   ├── etl-consistencia.md           # Evidências de consistência do ETL (issue #3)
+│   └── ml-score-e-fatores.md         # Score contínuo e fatores do modelo (issue #4)
 └── assets/                            # Diagrama de arquitetura (Mermaid + PNG)
     ├── diagrama_arquitetura.mmd      # Fonte Mermaid editável
     └── diagrama_arquitetura.png      # Imagem renderizada
@@ -258,6 +260,17 @@ python src/api/pipeline_client.py
 streamlit run src/dashboard/app.py
 ```
 
+### Retreinar o modelo (opcional)
+
+O `risk_model.pkl` versionado é o modelo final da Sprint 4 (11 features, acurácia 0.835 e AUC 0.965
+no teste). Para reproduzir o treino sobre o dataset tratado pelo ETL:
+
+```bash
+python src/ml/train_model.py
+# → reescreve src/ml/models/risk_model.pkl e src/ml/relatorio_metricas.md
+# Em caminhos com acento, se o cross-validation falhar no joblib: defina JOBLIB_TEMP_FOLDER=C:/joblib_tmp
+```
+
 ### Simulador de telemetria
 
 O `simulador_telemetria.py` envia registros de telemetria sintéticos em fluxo contínuo:
@@ -285,7 +298,7 @@ Fluxo: POST `/login` → token JWT → POST `/telemetria` por registro → impri
 | GET | `/api/v1/equipamentos` | Lista frota completa | JWT |
 | GET | `/api/v1/equipamentos/{id}/risco` | Risco atual do equipamento | JWT |
 | GET | `/api/v1/alertas` | Alertas recentes (filtrado por equipamento para Operador) | JWT |
-| GET | `/api/v1/telemetria` | Histórico de telemetria com predições (filtrado por equipamento para Operador) | JWT |
+| GET | `/api/v1/telemetria` | Histórico de telemetria com predições e fatores do modelo (filtrado por equipamento para Operador; `limit` 1-1000) | JWT |
 | GET | `/api/v1/resumo-frota` | Resumo de risco por equipamento (view `vw_resumo_risco_equipamento`) | JWT |
 
 Usuários de demonstração (senhas armazenadas como hash bcrypt no banco):
@@ -325,7 +338,7 @@ python -m pytest tests/ -v
 | Arquivo | Cobertura |
 |---------|-----------|
 | `tests/conftest.py` | Fixtures: banco SQLite temporário por teste, override de `get_db`, `TestClient` com `RiskPredictor` |
-| `tests/test_unit.py` | `faixa_proximidade`, `classificar_risco`, `score_regra` (alto/baixo), `_calcular_features` (campos derivados) |
+| `tests/test_unit.py` | `faixa_proximidade`, `classificar_risco`, `score_regra`, `score_continuo` (ponderado pelas probabilidades), `_calcular_features`, inferência do modelo (fatores por contribuição e continuidade do score) |
 | `tests/test_api.py` | Login (200/401), `/me`, POST `/telemetria` (201/401/403/422), RBAC por papel, GET `/telemetria` com filtragem e validação de `limit`, `/equipamentos`, `/alertas`, `/health` |
 | `tests/test_etl.py` | Carga idempotente (recarga não duplica nem insere 0), higienização por motivo (faltante, duplicado, domínio, faixa, incoerência), rastreabilidade `fonte`/`id_coleta`, migração de base legada |
 

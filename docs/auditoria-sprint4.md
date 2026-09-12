@@ -69,9 +69,9 @@ A ordem de execução #1 → #2 → ... se mantém válida.
 | B6 (ETL sujava a árvore) | ✅ resolvido | issue #3 — artefatos fora do versionamento |
 | B7 (`src/data/readme.md` defasado) | ⏳ #9 |
 | B8 (`start_api.py` não sobe servidor) | ⏳ #9 |
-| B9 (warnings da suite) | ⏳ #8 |
+| B9 (warnings da suite) | ⏳ #8 — caiu de 65 para 5 warnings com o modelo retreinado (o aviso de versão do scikit-learn sumiu) | `tests/` |
 | B10 (secret JWT de dev) | ⏳ #6 |
-| B11 (score de regra × score do modelo) | ⏳ #4 |
+| B11 (score de regra × score do modelo) | ✅ resolvido | issue #4 — `docs/ml-score-e-fatores.md` |
 
 ## 7. Notas de auditoria
 
