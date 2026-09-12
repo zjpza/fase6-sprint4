@@ -103,7 +103,7 @@ Camadas:
 ## 📁 Estrutura de Pastas
 
 ```
-fase-5-sprint-3/
+fase6-sprint4/
 ├── README.md                          # Este arquivo
 ├── start_api.py                        # Ponto de entrada da API (adiciona src/ ao PYTHONPATH)
 ├── requirements.txt                    # Dependências Python
@@ -119,9 +119,10 @@ fase-5-sprint-3/
 │   │   ├── telemetria_service.py      # Orquestra: features → score → persistência → predição → alerta
 │   │   ├── pipeline_client.py         # Cliente demo: login + 1 telemetria + alertas
 │   │   └── simulador_telemetria.py    # Simulador de fluxo contínuo (argparse CLI)
-│   ├── data/                          # ETL e pipelines
+│   ├── data/                          # ETL e pipelines (pacote: importável como data.*)
+│   │   ├── __init__.py               # Docstring do pacote ETL
 │   │   ├── generate_dataset.py        # Gera dataset sintético determinístico (SEED=42)
-│   │   ├── feature_engineering.py     # Features derivadas + scaler + validação
+│   │   ├── feature_engineering.py     # Features derivadas + scaler + validação (ValueError descritivo)
 │   │   ├── load_to_sql.py             # Carrega features.csv no banco SQLite
 │   │   ├── pipeline.py               # Orquestrador ETL: schema → dados → features → banco
 │   │   ├── scaler.pkl                 # MinMaxScaler treinado (Sprint 2)
@@ -152,6 +153,8 @@ fase-5-sprint-3/
 │   ├── conftest.py                   # Fixtures: banco SQLite temporário + TestClient
 │   ├── test_unit.py                  # Funções puras (faixa, score, features)
 │   └── test_api.py                   # Endpoints: login, RBAC, telemetria
+├── docs/                              # Documentação técnica
+│   └── auditoria-sprint4.md          # Diagnóstico da base importada (issue #1)
 └── assets/                            # Diagrama de arquitetura (Mermaid + PNG)
     ├── diagrama_arquitetura.mmd      # Fonte Mermaid editável
     └── diagrama_arquitetura.png      # Imagem renderizada
@@ -183,8 +186,8 @@ fase-5-sprint-3/
 
 ```bash
 # Clone o repositório
-git clone https://github.com/zjpza/fase-5-sprint-3.git
-cd fase-5-sprint-3
+git clone https://github.com/zjpza/fase6-sprint4.git
+cd fase6-sprint4
 
 # Crie um ambiente virtual (recomendado)
 python -m venv venv
@@ -251,7 +254,7 @@ O `simulador_telemetria.py` envia registros de telemetria sintéticos em fluxo c
 python src/api/simulador_telemetria.py [opções]
 
 # Opções:
-#   --base-url   URL base da API (default: http://127.0.0.1:8000/api/v1)
+#   --base-url   URL base da API (default: http://127.0.0.1:8000/api/v1; aceita com ou sem /api/v1)
 #   --n          Número de registros a enviar (default: 20)
 #   --interval   Intervalo entre envios em segundos (default: 2.0)
 #   --role       Papel para autenticação: operador ou gestor (default: gestor)

@@ -1,6 +1,9 @@
 """Testes das funções puras de features e score (fonte única: ml.features)."""
 from __future__ import annotations
 
+import pandas as pd
+import pytest
+
 from ml.features import (
     calcular_features as _calcular_features,
     classificar_risco as _classificar_risco,
@@ -89,3 +92,32 @@ def test_calcular_features_campos():
         "risco_manutencao",
     ):
         assert chave in row
+
+
+# --- Sprint 4 (#2 REFACT): correções da auditoria (B3, B4, validações) ---
+
+def test_normalizar_base_url_simulador():
+    """B3: --base-url sem /api/v1 não pode mais gerar 404 no simulador."""
+    from api.simulador_telemetria import _normalizar_base_url
+
+    assert _normalizar_base_url("http://127.0.0.1:8000") == "http://127.0.0.1:8000/api/v1"
+    assert _normalizar_base_url("http://127.0.0.1:8000/") == "http://127.0.0.1:8000/api/v1"
+    assert _normalizar_base_url("http://127.0.0.1:8000/api/v1") == "http://127.0.0.1:8000/api/v1"
+    assert _normalizar_base_url("http://127.0.0.1:8000/api/v1/") == "http://127.0.0.1:8000/api/v1"
+
+
+def test_pipeline_importavel_como_pacote():
+    """B4: ETL deve importar como pacote a partir de src/, sem depender de cwd=src/data."""
+    import data.pipeline as pipeline
+
+    assert callable(pipeline.executar_schema)
+    assert callable(pipeline.run_pipeline)
+
+
+def test_validar_features_mensagem_de_erro_clara():
+    """Validação de features deve levantar ValueError com o problema nomeado, não assert genérico."""
+    from data.feature_engineering import validar_features
+
+    df = pd.DataFrame({"score_risco": [150], "diff_score": [0]})
+    with pytest.raises(ValueError, match="score_risco"):
+        validar_features(df)

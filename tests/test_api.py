@@ -183,3 +183,48 @@ def test_resumo_frota(client):
     assert isinstance(rows, list)
     assert any(r["id_equipamento"] == "EQ-MT-0023" for r in rows)
     assert all("score_medio" in r for r in rows)
+
+
+# --- Sprint 4 (#2 REFACT): exceções e validações nos pontos de contato ---
+
+def test_telemetria_equipamento_inexistente(client):
+    """Payload válido + equipamento não cadastrado -> 422 claro, não 500 de FK."""
+    token = _login(client, *GESTOR)
+    payload = {**TELEMETRIA_PAYLOAD, "id_equipamento": "EQ-XX-9999"}
+    resp = _post_telemetria(client, token, payload)
+    assert resp.status_code == 422
+    assert "não cadastrado" in resp.json()["detail"]
+
+
+def test_telemetria_rejeitada_fica_na_auditoria(client, db):
+    """Entrada rejeitada deve deixar rastro auditável (regra + motivo), não sumir.
+
+    O id do equipamento vai em `detalhes` porque auditoria.id_equipamento tem
+    FK para equipamentos — um id não cadastrado violaria a chave.
+    """
+    token = _login(client, *GESTOR)
+    payload = {**TELEMETRIA_PAYLOAD, "id_equipamento": "EQ-XX-9999"}
+    _post_telemetria(client, token, payload)
+    row = db.execute(
+        "SELECT acao, detalhes FROM auditoria WHERE acao = ? ORDER BY id_auditoria DESC LIMIT 1",
+        ("telemetria_rejeitada",),
+    ).fetchone()
+    assert row is not None
+    assert "EQ-XX-9999" in row["detalhes"]
+
+
+def test_telemetria_limit_fora_do_padrao(client):
+    """limit inválido (0, negativo, >1000) deve ser 422, não consulta sem limites."""
+    token = _login(client, *GESTOR)
+    for bad in ("0", "-1", "1001", "abc"):
+        resp = client.get(f"/api/v1/telemetria?limit={bad}", headers=_auth(token))
+        assert resp.status_code == 422, f"limit={bad} deveria ser 422, veio {resp.status_code}"
+
+
+def test_telemetria_limit_valido_mantem_paginacao(client):
+    token = _login(client, *GESTOR)
+    for _ in range(3):
+        _post_telemetria(client, token, TELEMETRIA_PAYLOAD)
+    resp = client.get("/api/v1/telemetria?limit=2", headers=_auth(token))
+    assert resp.status_code == 200
+    assert len(resp.json()) == 2
