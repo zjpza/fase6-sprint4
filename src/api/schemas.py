@@ -100,6 +100,21 @@ class UserResponse(BaseModel):
     id_equipamento_acesso: str | None = None
 
 
+class AuditoriaResponse(BaseModel):
+    id_auditoria: int
+    data_hora: datetime
+    usuario: str | None = Field(None, description="Nome de quem fez a chamada (nulo para chamadas sem usuário).")
+    acao: str = Field(..., description="O que aconteceu (login, telemetria, decisao_risco, consultas).")
+    recurso: str | None = None
+    id_equipamento: str | None = None
+    id_registro: int | None = None
+    detalhes: str | None = Field(
+        None,
+        description="Contexto da chamada; nas decisões de risco traz score da regra, score do modelo, alerta e fatores.",
+    )
+    ip_origem: str | None = None
+
+
 class TelemetriaHistoricoResponse(BaseModel):
     id_registro: int
     id_equipamento: str

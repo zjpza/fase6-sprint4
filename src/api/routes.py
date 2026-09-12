@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from api.database import get_db
 from api.schemas import (
     AlertaResponse,
+    AuditoriaResponse,
     EquipamentoResponse,
     LoginInput,
     TelemetriaHistoricoResponse,
@@ -21,7 +22,7 @@ from api.schemas import (
 from api.telemetria_service import ColetaDuplicada, processar_telemetria
 from security.audit_logger import log
 from security.auth import authenticate, create_access_token, get_current_user
-from security.rbac import require_operador_or_gestor
+from security.rbac import require_gestor_or_analista, require_operador_or_gestor
 
 router = APIRouter(prefix="/api/v1")
 
@@ -160,6 +161,48 @@ def listar_alertas(
         ip_origem=_get_client_ip(request),
     )
     return [dict(row) for row in cursor.fetchall()]
+
+
+@router.get("/auditoria", response_model=list[AuditoriaResponse])
+def listar_auditoria(
+    db: Annotated[sqlite3.Connection, Depends(get_db)],
+    request: Request,
+    user: dict = Depends(require_gestor_or_analista),
+    limit: Annotated[int, Query(ge=1, le=1000, description="Registros por página (1-1000)")] = 100,
+    acao: Annotated[str | None, Query(description="Filtra por tipo de evento (ex.: decisao_risco)")] = None,
+):
+    """Trilha de auditoria: quem acessou, quando e o que o sistema decidiu.
+
+    Restrita a Gestor de Frota e Analista — o operador não consulta a trilha dos outros.
+    Cada linha traz usuário, ação, recurso, equipamento/registro afetado, IP e detalhes;
+    nas decisões de risco o detalhe inclui score da regra, score do modelo, alerta e fatores.
+    """
+    query = """
+        SELECT a.id_auditoria, a.data_hora, u.nome AS usuario, a.acao, a.recurso,
+               a.id_equipamento, a.id_registro, a.detalhes, a.ip_origem
+        FROM auditoria a
+        LEFT JOIN usuarios u ON u.id_usuario = a.id_usuario
+    """
+    params: list = []
+    if acao:
+        query += " WHERE a.acao = ?"
+        params.append(acao)
+    query += " ORDER BY a.id_auditoria DESC LIMIT ?"
+    params.append(limit)
+
+    rows = [dict(row) for row in db.execute(query, params).fetchall()]
+
+    log(
+        db,
+        id_usuario=user["id_usuario"],
+        acao="listar_auditoria",
+        recurso="/api/v1/auditoria",
+        detalhes=f"registros={len(rows)}; filtro_acao={acao or '—'}; limit={limit}",
+        ip_origem=_get_client_ip(request),
+    )
+    return rows
+
+
 @router.get("/telemetria", response_model=list[TelemetriaHistoricoResponse])
 def listar_telemetria(
     db: Annotated[sqlite3.Connection, Depends(get_db)],
@@ -283,7 +326,25 @@ def receber_telemetria(
         recurso="/api/v1/telemetria",
         id_equipamento=payload.id_equipamento,
         id_registro=resultado["id_registro"],
-        detalhes=f"score_regra={resultado['score_risco']}; predito={resultado['nivel_risco_predito']}",
+        detalhes=(
+            f"id_coleta={payload.id_coleta}; "
+            f"score_regra={resultado['score_risco']}; nivel_regra={resultado['nivel_risco']}"
+        ),
+        ip_origem=_get_client_ip(request),
+    )
+    log(
+        db,
+        id_usuario=user["id_usuario"],
+        acao="decisao_risco",
+        recurso="/api/v1/telemetria",
+        id_equipamento=resultado["id_equipamento"],
+        id_registro=resultado["id_registro"],
+        detalhes=(
+            f"score_regra={resultado['score_risco']} nivel_regra={resultado['nivel_risco']} "
+            f"score_modelo={resultado['score_risco_predito']} nivel_modelo={resultado['nivel_risco_predito']} "
+            f"alerta={int(resultado['alerta_predito'])} "
+            f"fatores={','.join(resultado['fatores_principais']) or '—'}"
+        ),
         ip_origem=_get_client_ip(request),
     )
     return resultado
