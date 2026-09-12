@@ -113,24 +113,26 @@ fase6-sprint4/
 ├── requirements.txt                    # Dependências Python
 ├── .env.example                        # Template de variáveis de ambiente (JWT_SECRET_KEY)
 ├── .gitignore
-├── sompo.db                            # Banco SQLite populado (gerado pelo pipeline)
+├── sompo.db                            # Banco SQLite (NÃO versionado — gerado pelo ETL, ver Como Executar)
 ├── src/                               # Código fonte
 │   ├── api/                           # Backend integrador (FastAPI)
 │   │   ├── main.py                    # App FastAPI + lifespan (carrega predictor singleton)
 │   │   ├── routes.py                  # Endpoints REST: login, telemetria, equipamentos, alertas
 │   │   ├── schemas.py                 # Modelos Pydantic (TelemetriaInput, TokenResponse, etc.)
-│   │   ├── database.py                # Conexão SQLite com row_factory e foreign_keys
+│   │   ├── database.py                # Conexão SQLite (data.conexao) para a API
 │   │   ├── telemetria_service.py      # Orquestra: features → score → persistência → predição → alerta
 │   │   ├── pipeline_client.py         # Cliente demo: login + 1 telemetria + alertas
 │   │   └── simulador_telemetria.py    # Simulador de fluxo contínuo (argparse CLI)
 │   ├── data/                          # ETL e pipelines (pacote: importável como data.*)
 │   │   ├── __init__.py               # Docstring do pacote ETL
+│   │   ├── conexao.py                 # Conexão SQLite compartilhada (FKs + busy_timeout)
 │   │   ├── generate_dataset.py        # Gera dataset sintético determinístico (SEED=42)
 │   │   ├── feature_engineering.py     # Features derivadas + scaler + validação (ValueError descritivo)
-│   │   ├── load_to_sql.py             # Carrega features.csv no banco SQLite
+│   │   ├── validacao_dados.py         # Higienização: faltantes, duplicidades, domínios e faixas
+│   │   ├── load_to_sql.py             # Carga idempotente em telemetria (rastreabilidade fonte/id_coleta)
 │   │   ├── pipeline.py               # Orquestrador ETL: schema → dados → features → banco
-│   │   ├── scaler.pkl                 # MinMaxScaler treinado (Sprint 2)
-│   │   └── label_encoders.pkl         # LabelEncoders (Sprint 2)
+│   │   ├── scaler.pkl                 # MinMaxScaler (gerado pelo ETL, não versionado)
+│   │   └── label_encoders.pkl         # LabelEncoders (gerado pelo ETL, não versionado)
 │   ├── ml/                            # Modelo preditivo e inferência
 │   │   ├── models/
 │   │   │   └── risk_model.pkl         # Random Forest serializado (Sprint 2)
@@ -153,12 +155,14 @@ fase6-sprint4/
 │   │   └── audit_logger.py            # log() para tabela de auditoria
 │   └── dashboard/                     # Interface (Streamlit) — consome a API via JWT
 │       └── app.py                    # Login JWT + 3 visões por persona (papel do token)
-├── tests/                             # Suite pytest (fixtures, testes unitários e de API)
+├── tests/                             # Suite pytest (fixtures, testes unitários, API e ETL)
 │   ├── conftest.py                   # Fixtures: banco SQLite temporário + TestClient
 │   ├── test_unit.py                  # Funções puras (faixa, score, features)
-│   └── test_api.py                   # Endpoints: login, RBAC, telemetria
+│   ├── test_api.py                   # Endpoints: login, RBAC, telemetria
+│   └── test_etl.py                   # ETL: idempotência, higienização e rastreabilidade
 ├── docs/                              # Documentação técnica
-│   └── auditoria-sprint4.md          # Diagnóstico da base importada (issue #1)
+│   ├── auditoria-sprint4.md          # Diagnóstico da base importada (issue #1)
+│   └── etl-consistencia.md           # Evidências de consistência do ETL (issue #3)
 └── assets/                            # Diagrama de arquitetura (Mermaid + PNG)
     ├── diagrama_arquitetura.mmd      # Fonte Mermaid editável
     └── diagrama_arquitetura.png      # Imagem renderizada
@@ -232,9 +236,12 @@ set DASHBOARD_API_URL=http://meu-servidor:8000/api/v1       # Windows (CMD)
 ### Executar o fluxo ponta a ponta
 
 ```bash
-# 1. Regenerar o banco de dados e os dados iniciais
+# 1. Regenerar o banco de dados e os dados iniciais (sompo.db NÃO vem no repositório)
 python src/data/pipeline.py
-# → esperado: "[OK] Pipeline concluído com sucesso."
+# → esperado: "[OK] Pipeline concluído com sucesso (997 registros em telemetria)."
+#    A carga é idempotente: rodar de novo insere 0 e informa "997 já presentes".
+#    Linhas faltantes, duplicadas ou fora de faixa são descartadas com motivo
+#    (ver docs/etl-consistencia.md).
 
 # 2. Iniciar o backend (API)
 python -m uvicorn start_api:app --host 127.0.0.1 --port 8000
@@ -308,7 +315,7 @@ O dashboard consome a API REST autenticada via JWT — não lê o banco diretame
 
 ### Testes automatizados
 
-A suite pytest cobre funções puras (features e score) e endpoints da API com RBAC:
+A suite pytest cobre funções puras (features e score), endpoints da API com RBAC e o ETL:
 
 ```bash
 # Com o venv ativado
@@ -319,7 +326,8 @@ python -m pytest tests/ -v
 |---------|-----------|
 | `tests/conftest.py` | Fixtures: banco SQLite temporário por teste, override de `get_db`, `TestClient` com `RiskPredictor` |
 | `tests/test_unit.py` | `faixa_proximidade`, `classificar_risco`, `score_regra` (alto/baixo), `_calcular_features` (campos derivados) |
-| `tests/test_api.py` | Login (200/401), `/me`, POST `/telemetria` (201/401/403), RBAC por papel, GET `/telemetria` com filtragem, `/equipamentos`, `/alertas`, `/health` |
+| `tests/test_api.py` | Login (200/401), `/me`, POST `/telemetria` (201/401/403/422), RBAC por papel, GET `/telemetria` com filtragem e validação de `limit`, `/equipamentos`, `/alertas`, `/health` |
+| `tests/test_etl.py` | Carga idempotente (recarga não duplica nem insere 0), higienização por motivo (faltante, duplicado, domínio, faixa, incoerência), rastreabilidade `fonte`/`id_coleta`, migração de base legada |
 
 Os testes usam `TestClient` (FastAPI) em processo — não exigem API rodando. O banco é recriado em arquivo temporário a cada teste, garantindo isolamento.
 

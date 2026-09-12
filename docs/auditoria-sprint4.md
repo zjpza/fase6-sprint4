@@ -57,7 +57,24 @@ Simulador autenticado em fluxo contínuo; contrato Pydantic validado; RF carrega
 
 A ordem de execução #1 → #2 → ... se mantém válida.
 
-## 6. Notas de auditoria
+## 6. Status das correções
+
+| Achado | Situação | Onde |
+|--------|----------|------|
+| B1 (bcrypt) | ✅ resolvido | issue #2 — `requirements.txt` pinado |
+| B2 (carga insere 0 e reporta OK) | ✅ resolvido | issue #3 — `docs/etl-consistencia.md` |
+| B3 (URL do simulador) | ✅ resolvido | issue #2 |
+| B4 (imports do ETL) | ✅ resolvido | issue #2 |
+| B5 (`sompo.db` não versionado) | ⏳ instruções no README (#9); ETL documentado como passo obrigatório | `README.md` §Como Executar |
+| B6 (ETL sujava a árvore) | ✅ resolvido | issue #3 — artefatos fora do versionamento |
+| B7 (`src/data/readme.md` defasado) | ⏳ #9 |
+| B8 (`start_api.py` não sobe servidor) | ⏳ #9 |
+| B9 (warnings da suite) | ⏳ #8 |
+| B10 (secret JWT de dev) | ⏳ #6 |
+| B11 (score de regra × score do modelo) | ⏳ #4 |
+
+## 7. Notas de auditoria
 
 - O `sompo.db` local (não rastreado) foi tocado durante a auditoria: o simulador inseriu 3 registros de telemetria (ids 1014-1016) e 2 alertas (ids 8-9) via API. Sem impacto no repositório; removíveis com um re-run do ETL sobre base zerada, se desejado.
 - O simulador não aborta o lote ao receber 403 de RBAC — imprime `ERRO HTTP` por registro e continua (comportamento observado com `--role operador`).
+- Achados adicionais na #3 (detalhe em `docs/etl-consistencia.md`): `astype(bool)` em `alerta_gerado` transformaria `"0"`/`"1"` da fonte em `True`; o `INSERT OR IGNORE` tolerava **qualquer** violação de constraint (não só duplicidade), o que mascarava linha ruim como sucesso; e o dataset simulado tem 3 duplicidades de chave natural (mesmo equipamento no mesmo instante) em 1.000 sorteios.
