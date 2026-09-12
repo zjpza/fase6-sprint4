@@ -1,5 +1,7 @@
-"""Testes de integração dos endpoints da API com TestClient (login, RBAC, telemetria)."""
+"""Testes de integração dos endpoints da API com TestClient (login, RBAC, telemetria, auditoria)."""
 from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -330,3 +332,102 @@ def test_payload_sem_campo_obrigatorio_e_recusado(client, db):
 
     assert resp.status_code == 422
     assert db.execute("SELECT COUNT(*) FROM telemetria").fetchone()[0] == 0
+
+
+# --- Sprint 4 (#6 SEGURANÇA): token, injeção e trilha de auditoria ---
+
+def _token_forjado(email: str, segredo: str, expira_em_minutos: int) -> str:
+    import jwt
+
+    from security.auth import ALGORITHM
+
+    expira = datetime.now(timezone.utc) + timedelta(minutes=expira_em_minutos)
+    return jwt.encode({"sub": email, "role": "GestorFrota", "exp": expira}, segredo, algorithm=ALGORITHM)
+
+
+def test_token_expirado_e_recusado(client):
+    """Token vencido não vale mais: a expiração é validada a cada requisição."""
+    from security.auth import SECRET_KEY
+
+    expirado = _token_forjado(GESTOR[0], SECRET_KEY, expira_em_minutos=-5)
+
+    resp = client.get("/api/v1/equipamentos", headers=_auth(expirado))
+
+    assert resp.status_code == 401
+    assert "expirado" in resp.json()["detail"].lower()
+
+
+def test_token_com_assinatura_de_outro_segredo_e_recusado(client):
+    """Token assinado com segredo diferente (tentativa de forjar acesso) é recusado."""
+    forjado = _token_forjado(GESTOR[0], "segredo-de-outro-ambiente-com-32-bytes", expira_em_minutos=60)
+
+    resp = client.get("/api/v1/equipamentos", headers=_auth(forjado))
+
+    assert resp.status_code == 401
+    assert "inválido" in resp.json()["detail"].lower()
+
+
+def test_segredo_nao_fica_embutido_no_codigo():
+    """Sem JWT_SECRET_KEY, a API usa um segredo aleatório — nada de default versionado (B10)."""
+    from security.auth import SECRET_KEY
+
+    assert SECRET_KEY != "agrorisk-dev-secret-change-me-32b"
+    assert len(SECRET_KEY) >= 32
+
+
+def test_identificador_com_sql_nao_afeta_o_banco(client, db):
+    """Entrada maliciosa em campo identificador é recusada pela validação, sem tocar o schema."""
+    token = _login(client, *GESTOR)
+    payload = {**TELEMETRIA_PAYLOAD, "id_equipamento": "EQ-MT-0023'; DROP TABLE telemetria; --"}
+
+    resp = _post_telemetria(client, token, payload)
+
+    assert resp.status_code == 422
+    assert (
+        db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='telemetria'").fetchone()
+        is not None
+    )
+
+
+def test_decisao_de_risco_fica_na_auditoria(client, db):
+    """A trilha registra a decisão do sistema (scores, alerta e fatores), não só o acesso."""
+    token = _login(client, *GESTOR)
+
+    _post_telemetria(client, token, {**TELEMETRIA_PAYLOAD, "id_coleta": 9100})
+
+    decisao = db.execute(
+        "SELECT * FROM auditoria WHERE acao = 'decisao_risco' ORDER BY id_auditoria DESC LIMIT 1"
+    ).fetchone()
+    assert decisao is not None
+    assert "score_regra=" in decisao["detalhes"]
+    assert "score_modelo=" in decisao["detalhes"]
+    assert "fatores=" in decisao["detalhes"]
+    assert decisao["id_registro"] is not None
+
+
+def test_auditoria_consultavel_para_gestor_e_analista(client):
+    """A trilha é legível por quem audita: gestor e analista enxergam usuário, ação e horário."""
+    token_gestor = _login(client, *GESTOR)
+    _post_telemetria(client, token_gestor, {**TELEMETRIA_PAYLOAD, "id_coleta": 9200})
+
+    resp = client.get("/api/v1/auditoria?limit=5", headers=_auth(token_gestor))
+
+    assert resp.status_code == 200
+    eventos = resp.json()
+    assert eventos
+    assert {"data_hora", "usuario", "acao", "detalhes", "ip_origem"} <= set(eventos[0])
+
+    resp_analista = client.get(
+        "/api/v1/auditoria?acao=decisao_risco", headers=_auth(_login(client, *ANALISTA))
+    )
+    assert resp_analista.status_code == 200
+    assert all(evento["acao"] == "decisao_risco" for evento in resp_analista.json())
+
+
+def test_operador_nao_acessa_a_trilha_de_auditoria(client):
+    """Operador não consulta a trilha (RBAC) — ela expõe a operação dos outros."""
+    token = _login(client, *OPERADOR)
+
+    resp = client.get("/api/v1/auditoria", headers=_auth(token))
+
+    assert resp.status_code == 403
