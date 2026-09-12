@@ -27,12 +27,12 @@ DASHBOARD_DEMO_LOGIN=gestor python -m streamlit run src/dashboard/app.py
 |---|---|---|---|
 | 1 | 0:00-0:25 | README aberto no diagrama de arquitetura | "AgroRisk AI, FIAP + Sompo. Pipeline: coleta simulada → ETL higienizado e rastreável → API FastAPI → SQLite → modelo → dashboard, com auditoria das decisões." |
 | 2 | 0:25-0:50 | Terminal: `python src/data/pipeline.py` rodando | "O ETL carrega 997 registros e **descarta 3 duplicidades com motivo**. Rodando de novo, ele insere 0 e informa '997 já presentes' — a carga é idempotente e cada registro guarda fonte e id de coleta." |
-| 3 | 0:50-1:35 | Terminal: `python src/api/simulador_telemetria.py --n 5 --interval 1 --lote 1` | "O simulador autentica, envia telemetria e imprime a resposta: score da regra, score do modelo e se gerou alerta. Cada envio tem id de coleta: reenviar o mesmo dá 409, sem duplicar." |
+| 3 | 0:50-1:35 | Terminal: `python src/api/simulador_telemetria.py --n 5 --interval 1 --lote 1` | "O simulador autentica, envia telemetria e imprime a resposta: score da regra, score do modelo, o alerta (decisão da regra) e a marca de divergência. Cada envio tem id de coleta: reenviar o mesmo dá 409, sem duplicar." |
 | 4 | 1:35-2:00 | Swagger (`/docs`): `POST /api/v1/telemetria` expandido e a resposta JSON | "Na API a entrada é validada por Pydantic; o serviço calcula as features, o score da regra, chama o modelo e grava telemetria, score, alerta e a decisão na trilha — tudo na mesma transação." |
-| 5 | 2:00-2:40 | Dashboard como **Operador** (Carlos) | "Visão do operador: score da regra 58 e score do modelo 33 — mesma escala, então dá para ver quando discordam. O alerta cita os fatores que **realmente** pesaram na predição, não uma causa fixa." |
+| 5 | 2:00-2:40 | Dashboard como **Operador** (Carlos) | "Visão do operador: score da regra 58 e score do modelo 33 — mesma escala, então dá para ver quando discordam. O alerta cita as penalidades da regra com os pontos de cada uma e a segunda opinião do modelo; a regra decide, o modelo sinaliza ambiguidade." |
 | 6 | 2:40-3:30 | Dashboard como **Gestor** (Fernanda) | "Visão da gestora: mapa de risco da frota, distribuição por nível, evolução, tendência por região e score por tipo de operação, além do critério de classificação explícito na tela." |
 | 7 | 3:30-4:10 | Dashboard como **Analista** (Ricardo) + exportação CSV | "Visão da analista: histórico de alertas com exportação e a trilha de auditoria — quem acessou, quando, e o que o sistema decidiu, com scores, alerta e fatores de cada registro." |
-| 8 | 4:10-4:40 | Terminal: `python -m pytest tests/ -q` | "76 testes passando, incluindo um fluxo completo ETL → API → score → alerta → auditoria." |
+| 8 | 4:10-4:40 | Terminal: `python -m pytest tests/ -q` | "80 testes passando, incluindo um fluxo completo ETL → API → score → alerta da regra → auditoria." |
 | 9 | 4:40-5:00 | Volta ao README (decisões técnicas e prints) | "As decisões de cada correção estão registradas em docs/, com as evidências das issues #1 a #9." |
 
 ## Checklist antes de publicar

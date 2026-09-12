@@ -344,7 +344,8 @@ def receber_telemetria(
         detalhes=(
             f"score_regra={resultado['score_risco']} nivel_regra={resultado['nivel_risco']} "
             f"score_modelo={resultado['score_risco_predito']} nivel_modelo={resultado['nivel_risco_predito']} "
-            f"alerta={int(resultado['alerta_predito'])} "
+            f"alerta={int(resultado['alerta_gerado'])} "
+            f"divergente={int(resultado['divergente'])} "
             f"fatores={','.join(resultado['fatores_principais']) or '—'}"
         ),
         ip_origem=_get_client_ip(request),

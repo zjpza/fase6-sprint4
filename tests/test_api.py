@@ -439,6 +439,57 @@ def test_decisao_de_risco_fica_na_auditoria(client, db):
     assert decisao["id_registro"] is not None
 
 
+def test_alerta_do_historico_segue_a_regra_mesmo_divergindo(client, db):
+    """A regra é a fonte única: alerta na tela implica registro no histórico, mesmo divergente."""
+    token = _login(client, *GESTOR)
+    equipamento = client.get("/api/v1/equipamentos", headers=_auth(token)).json()[0]["id_equipamento"]
+
+    # Payload Crítico pela regra (proximidade 40 m, precipitação 60, umidade 92,
+    # Argiloso, 3 incidentes) — o modelo pode discordar; o alerta não depende dele.
+    payload = {
+        "id_equipamento": equipamento,
+        "id_coleta": 910001,
+        "tipo_operacao": "Campo",
+        "latitude": -13.4,
+        "longitude": -56.0,
+        "proximidade_agua_m": 40,
+        "precipitacao_mm": 60.0,
+        "umidade_solo_pct": 92.0,
+        "tipo_solo": "Argiloso",
+        "declividade_graus": 12.0,
+        "temperatura_c": 29.0,
+        "velocidade_vento_kmh": 20.0,
+        "visibilidade_m": 800,
+        "horas_uso_equipamento": 6000,
+        "dias_ultima_manutencao": 90,
+        "velocidade_operacao_kmh": 11.0,
+        "carga_pct": 96.0,
+        "nivel_combustivel_pct": 55.0,
+        "historico_incidentes": 3,
+    }
+    resp = _post_telemetria(client, token, payload)
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+
+    assert body["alerta_gerado"] is True
+    alerta = db.execute(
+        "SELECT nivel_risco, score_risco, mensagem FROM alertas WHERE id_registro = ?",
+        (body["id_registro"],),
+    ).fetchone()
+    assert alerta is not None
+    assert alerta["nivel_risco"] == body["nivel_risco"]
+    assert alerta["score_risco"] == body["score_risco"]
+    assert "Fatores principais" in alerta["mensagem"]
+
+    # Flag coerente em qualquer direção de divergência.
+    assert body["divergente"] == (body["nivel_risco"] != body["nivel_risco_predito"])
+
+    # A trilha registra o alerta da regra e a divergência sinalizada.
+    eventos = client.get("/api/v1/auditoria?acao=decisao_risco", headers=_auth(token)).json()
+    assert f"alerta={int(body['alerta_gerado'])}" in eventos[0]["detalhes"]
+    assert f"divergente={int(body['divergente'])}" in eventos[0]["detalhes"]
+
+
 def test_auditoria_consultavel_para_gestor_e_analista(client):
     """A trilha é legível por quem audita: gestor e analista enxergam usuário, ação e horário."""
     token_gestor = _login(client, *GESTOR)

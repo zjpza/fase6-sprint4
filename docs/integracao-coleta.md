@@ -54,14 +54,16 @@ Total de telemetria inalterado (1040) e nenhum score duplicado.
 
 ```
 python src/api/simulador_telemetria.py --n 3 --interval 0 --role operador \
-       --equipamento EQ-MT-0023 --lote 1
-EQ-MT-0023 -> 81 (Crítico) | predito 55 (Alto) | alerta SIM
-EQ-MT-0023 -> 58 (Alto)   | predito 33 (Médio) | alerta NÃO
+       --equipamento EQ-MT-0023 --lote 502
+EQ-MT-0023 -> 81 (Crítico) | predito 55 (Alto) | alerta SIM | divergente
+EQ-MT-0023 -> 58 (Alto)   | predito 33 (Médio) | alerta SIM | divergente
 EQ-MT-0023 -> 100 (Crítico)| predito 81 (Crítico) | alerta SIM
 Resumo: 3 enviados | 3 aceitos | 0 já registrados | 0 rejeitados pela API | 0 falhas de rede
-
-coletas do lote 1: 3 | telemetria total: 1043 | scores: 1043 | sem score: 0 | duplicados equip+instante: 0
 ```
+
+`alerta` segue a **regra** (fonte única de decisão): o segundo registro é Alto pela regra e
+Médio pelo modelo — alerta emitido (SIM) e divergência sinalizada. Na Sprint 3 essa linha
+mostrava `alerta NÃO`: o modelo decidia e a coleta nunca entrava no histórico de alertas.
 
 ### API fora do ar
 

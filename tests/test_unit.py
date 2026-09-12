@@ -17,10 +17,12 @@ from ml.features import (
     REPRESENTANTE_NIVEL as _REPRESENTANTE_NIVEL,
     calcular_features as _calcular_features,
     classificar_risco as _classificar_risco,
+    componentes_regra as _componentes_regra,
     faixa_proximidade as _faixa_proximidade,
     score_continuo as _score_continuo,
     score_regra as _score_regra,
 )
+from ml.recomendacao import mensagem_alerta as _mensagem_alerta
 
 
 def test_faixa_proximidade():
@@ -85,8 +87,8 @@ def test_score_regra_basico():
     assert score >= 70
 
 
-def test_score_regra_baixo():
-    payload = {
+def _payload_baixo():
+    return {
         "proximidade_agua_m": 800,
         "umidade_solo_pct": 20,
         "precipitacao_mm": 0,
@@ -100,7 +102,10 @@ def test_score_regra_baixo():
         "visibilidade_m": 5000,
         "tipo_operacao": "Transporte",
     }
-    row = _calcular_features(payload)
+
+
+def test_score_regra_baixo():
+    row = _calcular_features(_payload_baixo())
     score = _score_regra(row)
     assert 0 <= score <= 100
     assert score <= 25
@@ -120,6 +125,39 @@ def test_calcular_features_campos():
         "risco_manutencao",
     ):
         assert chave in row
+
+
+# --- Sprint 4 (fonte única): decomposição auditável da regra + mensagem do alerta ---
+
+def test_componentes_regra_somam_o_score():
+    """A decomposição nomeada soma exatamente o score da regra — sem fórmula duplicada."""
+    for payload in (_payload_alto(), _payload_baixo()):
+        row = _calcular_features(payload)
+        assert int(min(100, max(0, sum(_componentes_regra(row).values())))) == _score_regra(row)
+
+
+def test_componentes_regra_ordenam_as_penalidades_reais():
+    """Equipamento perto da água: a proximidade está no top-3 de penalidades reais."""
+    row = _calcular_features(_payload_alto())
+    top = sorted(_componentes_regra(row).items(), key=lambda p: p[1], reverse=True)[:3]
+    assert "proximidade de água" in [nome for nome, _ in top]
+
+
+def test_mensagem_alerta_cita_penalidades_e_segunda_opiniao():
+    """A mensagem cita as penalidades da regra e o modelo como segunda opinião — não como decisão."""
+    row = _calcular_features(_payload_alto())
+    componentes = _componentes_regra(row)
+
+    msg = _mensagem_alerta(
+        "Alto", componentes, {"nivel_risco_predito": "Médio", "score_risco_predito": 33}
+    )
+    assert "Fatores principais" in msg
+    assert "proximidade de água" in msg
+    assert "Segunda opinião do modelo: Médio (33)" in msg
+
+    msg_sem_modelo = _mensagem_alerta("Alto", componentes, None)
+    assert "Fatores principais" in msg_sem_modelo
+    assert "Segunda opinião" not in msg_sem_modelo
 
 
 class _RespostaFalsa:

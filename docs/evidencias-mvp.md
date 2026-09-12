@@ -7,79 +7,111 @@ score → alerta/relatório → auditoria, com a suite verde e as leituras de vo
 
 ```
 python -m pytest tests/ -q
-76 passed, 2 warnings in 27.37s
+80 passed, 2 warnings in 25.24s
 ```
 
 | Arquivo | Casos | Cobre |
 |---|---|---|
-| `tests/test_unit.py` | 20 | Funções puras de feature/score, score contínuo, fatores por contribuição, retry/retomada do simulador |
-| `tests/test_api.py` | 36 | Login, RBAC, POST/GET telemetria, 409 de coleta repetida, payloads sujos, token expirado/forjado, auditoria |
-| `tests/test_etl.py` | 15 | Idempotência da carga, higienização por motivo, rastreabilidade, migração de base legada |
-| `tests/test_e2e.py` | 3 | **Fluxo completo**: ETL em diretório temporário → API contra esse banco → score → alerta → auditoria |
+| `tests/test_unit.py` | 23 | Funções puras de feature/score, **decomposição auditável da regra (`componentes_regra`)**, **mensagem do alerta com penalidades e segunda opinião**, score contínuo, fatores por contribuição, retry/retomada do simulador |
+| `tests/test_api.py` | 38 | Login, RBAC, POST/GET telemetria, 409 de coleta repetida, payloads sujos, token expirado/forjado, auditoria, **alerta do histórico seguindo a regra mesmo divergindo** |
+| `tests/test_etl.py` | 16 | Idempotência da carga, higienização por motivo, rastreabilidade, migração de base legada |
+| `tests/test_e2e.py` | 3 | **Fluxo completo**: ETL em diretório temporário → API contra esse banco → score → alerta da regra no histórico → auditoria |
 | `tests/conftest.py` | — | Banco temporário por teste, `TestClient`, segredo de teste fixo |
 
-As 2 warnings restantes vêm de bibliotecas (depreciações do Starlette/anyio), não do projeto —
+As 2 warnings restantes vêm de bibliotecas (deprecações do Starlette/anyio), não do projeto —
 eram **65** antes desta sprint.
 
 ## 2. Execução demonstrativa de ponta a ponta
 
+Banco regenerado do zero (`python src/data/pipeline.py` → 997 inseridos, 0 duplicados) com as
+predições do dataset em lote (`python src/ml/04_predict.py`), API no ar e coleta simulada.
+
 ### Estado antes da coleta
 
 ```
-telemetria          : 1045
-  por fonte         : {'api': 48, 'dataset_simulado': 997}
-scores_modelo       : 1045
-alertas             : 26
-eventos de auditoria: 146
+telemetria          : 997   (fonte: dataset_simulado)
+scores_modelo       : 997   (predição em lote sobre a base do ETL)
+alertas             : 0
+eventos de auditoria: 0
 entradas sem score  : 0
 ```
 
 ### Coleta simulada (lote novo, 10 registros, sem intervalo)
 
 ```
-python src/api/simulador_telemetria.py --n 10 --interval 0 --lote 3
-EQ-BA-0035 -> 52 (Alto) | predito 14 (Baixo) | alerta NÃO
+python src/api/simulador_telemetria.py --n 10 --interval 0 --lote 501
+EQ-GO-0006 -> 81 (Crítico) | predito 55 (Alto) | alerta SIM | divergente
+EQ-PR-0025 -> 58 (Alto) | predito 33 (Médio) | alerta SIM | divergente
+EQ-GO-0007 -> 100 (Crítico) | predito 81 (Crítico) | alerta SIM
+EQ-PR-0023 -> 85 (Crítico) | predito 44 (Médio) | alerta SIM | divergente
+EQ-PR-0023 -> 65 (Alto) | predito 60 (Alto) | alerta SIM
+EQ-RS-0039 -> 77 (Crítico) | predito 18 (Baixo) | alerta SIM | divergente
+EQ-MT-0017 -> 100 (Crítico) | predito 70 (Alto) | alerta SIM | divergente
+EQ-MT-0003 -> 70 (Alto) | predito 41 (Médio) | alerta SIM | divergente
+EQ-PR-0030 -> 75 (Alto) | predito 44 (Médio) | alerta SIM | divergente
+EQ-BA-0035 -> 52 (Alto) | predito 14 (Baixo) | alerta SIM | divergente
 Resumo: 10 enviados | 10 aceitos | 0 já registrados | 0 rejeitados pela API | 0 falhas de rede
 ```
+
+Os 10 registros são Alto/Crítico **pela regra** — e os 10 geraram alerta, inclusive os 8 em que
+o modelo discorda (antes, estes mostrariam `alerta NÃO` e nunca entrariam no histórico).
 
 ### Estado depois da coleta
 
 ```
-telemetria          : 1055 (antes 1045)      ← +10 exatos
-scores_modelo       : 1055 (antes 1045)
-alertas             : 30 (antes 26)
-eventos de auditoria: 167 (antes 146)
-coletas do lote 3   : 10
-entradas sem score  : 0                       ← toda entrada tem score
-duplicados equip+inst: 0
+telemetria          : 1007 (antes 997)       ← +10 exatos
+  por fonte         : {'api': 10, 'dataset_simulado': 997}
+scores_modelo       : 1007 (antes 997)
+alertas             : 10 (antes 0)           ← 1 por coleta Alto/Crítico
+eventos de auditoria: 21 (antes 0)
+coletas do lote 501 : 10
+entradas sem score  : 0                      ← toda entrada tem score
+duplicados equip+hora: 0
 integridade         : ok
 ```
+
+**Coerência bidirecional regra↔histórico** (o defeito que motivou a fonte única):
+
+```sql
+SELECT COUNT(*) FROM telemetria t LEFT JOIN alertas a ON a.id_registro = t.id_registro
+  WHERE t.fonte='api' AND t.alerta_gerado = 1 AND a.id_alerta IS NULL;   -- == 0
+SELECT COUNT(*) FROM alertas a JOIN telemetria t ON a.id_registro = t.id_registro
+  WHERE t.alerta_gerado = 0;                                              -- == 0
+```
+
+Ambas zero: tela, trilha e histórico discordam de ninguém.
 
 ### Decisão registrada pela trilha
 
 ```
-2026-09-12T05:32:05 | decisao_risco |
-  score_regra=52 nivel_regra=Alto score_modelo=14 nivel_modelo=Baixo alerta=0
-  fatores=faixa_proximidade_encoded,horas_uso_equipamento,proximidade_agua_m
+2026-09-12T19:33:20 | Carlos Silva | decisao_risco |
+  score_regra=58 nivel_regra=Alto score_modelo=33 nivel_modelo=Médio alerta=1 divergente=1
+  fatores=velocidade_operacao_kmh,faixa_proximidade_encoded,historico_incidentes
 ```
 
-### Alerta emitido (com os fatores do registro)
+`alerta=1` é a decisão da **regra**; `divergente=1` sinaliza o caso ambíguo ao auditor.
+
+### Alerta emitido (penalidades da regra + segunda opinião)
 
 ```
-Alto | score 70 | Preventivo |
+EQ-PR-0025 | Alto | score 58 | Preventivo |
 ⚠️ Risco alto. Reduzir velocidade, evitar áreas alagadiças e monitorar condições do solo.
-Fatores principais: velocidade de operação, [...]
+Fatores principais: declividade (16 pts), velocidade de operação (11 pts), umidade do solo (9 pts).
+Segunda opinião do modelo: Médio (33) — caso divergente, inspecione as condições antes de confiar.
 ```
+
+A mensagem cita as penalidades nomeadas da regra com os pontos de cada uma
+(`ml.features.componentes_regra`) e o modelo como segunda opinião — não como decisão.
 
 ### Leituras de volta pela API (gestor e analista autenticados)
 
 ```
 GET /resumo-frota            : 200 — 46 equipamentos
 GET /equipamentos            : 50 equipamentos
-GET /telemetria?limit=1      : regra 52 Alto | modelo 14 Baixo | fatores ['faixa_proximidade_encoded', 'horas_uso_equipamento', 'proximidade_agua_m']
-GET /alertas                 : 30 alertas
-GET /equipamentos/EQ-MT-0023/risco : 200 — regra Alto × modelo Médio
-GET /auditoria?limit=3       : 3 eventos (último: login de Ricardo Mendes)
+GET /telemetria?limit=1      : EQ-MT-0023 | regra 58 Alto | modelo 33 Médio (divergente)
+GET /alertas                 : 14 alertas
+GET /equipamentos/EQ-BA-0035/risco : 200 — regra Alto × modelo Baixo
+GET /auditoria?limit=3       : 3 eventos (último: consultar_risco de Fernanda Costa)
 GET /health                  : {'status': 'ok', 'service': 'agrorisk-api', 'version': '3.0.0'}
 ```
 
@@ -106,6 +138,7 @@ pip install -r requirements.txt
 
 # 2. dados (sompo.db não é versionado)
 python src/data/pipeline.py
+python src/ml/04_predict.py          # predição em lote sobre a base do ETL
 
 # 3. API
 python -m uvicorn start_api:app --host 127.0.0.1 --port 8000

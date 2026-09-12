@@ -82,3 +82,10 @@ no conjunto de teste):
   números acima (CV), não por intuição.
 - **Fatores exibidos na API** não saem desta importância global: cada predição calcula a
   contribuição local das variáveis (ver `docs/ml-score-e-fatores.md`).
+- **Limitação estrutural — o rótulo vem da própria regra**: `nivel_risco` deriva de
+  `score_risco`, heurística determinística sobre as próprias variáveis de entrada. As
+  métricas acima medem quão bem o modelo **recupera a regra** (substituto suavizado com score
+  contínuo, fatores locais e sinal de ambiguidade) — não uma estimativa independente de
+  risco real. Em produção com dados da Sompo, o alvo deve ser desfecho observado (sinistro,
+  near-miss, manutenção corretiva); o pipeline (`train_model.py` sobre a saída do ETL) já
+  aceita esse troco de rótulo sem mudança estrutural.

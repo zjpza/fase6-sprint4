@@ -112,11 +112,18 @@ def test_fluxo_completo_etl_api_alerta_auditoria(ambiente_e2e):
             "SELECT COUNT(*) FROM scores_modelo WHERE id_registro = ?", (id_registro,)
         ).fetchone()[0] == 1
 
-        if corpo["nivel_risco_predito"] in ("Alto", "Crítico"):
-            alerta = conn.execute(
-                "SELECT mensagem FROM alertas WHERE id_registro = ?", (id_registro,)
-            ).fetchone()
-            assert alerta is not None and "Fatores principais" in alerta["mensagem"]
+        # A regra decide o alerta (fonte única): o payload é Crítico pela regra, então o
+        # registro TEM que estar no histórico auditável — mesmo que o modelo discorde.
+        assert corpo["nivel_risco"] in ("Alto", "Crítico")
+        assert corpo["alerta_gerado"] is True
+        alerta = conn.execute(
+            "SELECT nivel_risco, score_risco, mensagem FROM alertas WHERE id_registro = ?",
+            (id_registro,),
+        ).fetchone()
+        assert alerta is not None
+        assert alerta["nivel_risco"] == corpo["nivel_risco"]
+        assert alerta["score_risco"] == corpo["score_risco"]
+        assert "Fatores principais" in alerta["mensagem"]
 
         # 4. Reenvio da mesma coleta não duplica
         repetido = client.post("/api/v1/telemetria", json=payload, headers=headers)

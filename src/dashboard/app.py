@@ -30,7 +30,8 @@ SRC = Path(__file__).resolve().parents[1]
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from ml.features import FAIXAS_NIVEL  # noqa: E402
+from ml.features import FAIXAS_NIVEL, calcular_features, componentes_regra  # noqa: E402
+from ml.recomendacao import mensagem_alerta  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # Configuracao geral
@@ -430,9 +431,9 @@ def criterios_de_risco() -> None:
     st.caption(
         "Critério de classificação (escala 0-100, igual para a regra e para o modelo): "
         f"{faixas}. "
-        "Alerta preventivo é emitido quando o nível é **Alto** ou **Crítico**; "
-        "o alerta do modelo aparece separado (`Risco (ML)`) do alerta da regra (`Risco (regra)`) "
-        "para o operador ver quando os dois discordam."
+        "Alerta preventivo é emitido quando o nível da **regra** é **Alto** ou **Crítico** — "
+        "a regra é a fonte única de decisão (penalidades auditáveis). O modelo é **segunda "
+        "opinião**: níveis divergentes (`Risco (ML)` × `Risco (regra)`) sinalizam caso ambíguo."
     )
 
 
@@ -539,14 +540,15 @@ def visao_operador(df: pd.DataFrame) -> None:
         st.caption("Variáveis que mais pesaram na predição do modelo: " + ", ".join(f"`{f}`" for f in fatores))
 
     if nivel in ("Alto", "Crítico"):
-        # O texto cita o que realmente pesou no registro: o alerta antigo falava sempre de
-        # proximidade da água, mesmo quando ela não era a causa (mesma classe do B11).
-        causas = ", ".join(fatores) if fatores else "condições operacionais do registro"
+        # A REGRA decide o alerta (fonte única) e explica as penalidades que somaram o
+        # score; o modelo aparece como segunda opinião — divergência é ambiguidade sinalizada.
+        componentes = componentes_regra(calcular_features(atual.to_dict()))
+        pred = {
+            "nivel_risco_predito": atual.get("nivel_risco_predito"),
+            "score_risco_predito": atual.get("score_risco_predito"),
+        }
         st.error(
-            f"🚨 ALERTA {nivel.upper()} para {equip}: risco {nivel.lower()} "
-            f"(score da regra {int(atual['score_risco'])}, score do modelo {score_modelo if score_modelo is not None else '—'}). "
-            f"Fatores que pesaram: {causas}. Reduza a velocidade, evite áreas alagadiças e "
-            "acione o gestor antes de prosseguir."
+            f"🚨 ALERTA {nivel.upper()} para {equip}: {mensagem_alerta(nivel, componentes, pred)}"
         )
     elif nivel == "Médio":
         st.warning("⚠️ Atenção moderada. Monitore as condições do solo e do clima.")

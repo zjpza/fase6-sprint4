@@ -47,7 +47,10 @@ class TelemetriaResponse(BaseModel):
         description="Score 0-100 da regra explícita do domínio (heurística determinística, auditável linha a linha).",
     )
     nivel_risco: str = Field(..., description="Nível derivado do score da regra (Baixo/Médio/Alto/Crítico).")
-    alerta_gerado: bool
+    alerta_gerado: bool = Field(
+        ...,
+        description="Alerta emitido pela decisão da REGRA (fonte única de decisão do sistema).",
+    )
     score_risco_predito: int = Field(
         ...,
         description=(
@@ -56,7 +59,14 @@ class TelemetriaResponse(BaseModel):
         ),
     )
     nivel_risco_predito: str = Field(..., description="Classe prevista pelo modelo (argumento de maior probabilidade).")
-    alerta_predito: bool
+    alerta_predito: bool = Field(
+        ...,
+        description="O modelo também vê Alto/Crítico? Segunda opinião — não decide o alerta.",
+    )
+    divergente: bool = Field(
+        ...,
+        description="Regra e modelo classificam em níveis diferentes — caso ambíguo sinalizado ao operador.",
+    )
     recomendacao: str
     fatores_principais: list[str] = Field(
         ...,

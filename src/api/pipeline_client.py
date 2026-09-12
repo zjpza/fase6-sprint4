@@ -72,7 +72,8 @@ def main() -> None:
     print(f"\n[2] Telemetria enviada para {resultado['id_equipamento']}")
     print(f"    Score de risco (regra): {resultado['score_risco']} ({resultado['nivel_risco']})")
     print(f"    Score predito (ML): {resultado['score_risco_predito']} ({resultado['nivel_risco_predito']})")
-    print(f"    Alerta: {'SIM' if resultado['alerta_predito'] else 'NÃO'}")
+    print(f"    Alerta: {'SIM' if resultado['alerta_gerado'] else 'NÃO'}")
+    print(f"    Divergência regra × modelo: {'sim' if resultado['divergente'] else 'não'}")
     print(f"    Recomendação: {resultado['recomendacao']}")
 
     token_gestor = login("gestor")

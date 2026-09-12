@@ -46,3 +46,25 @@ def recomendar(nivel_risco: str, fatores: list[str] | str | None = None) -> str:
         base += f" Fatores principais: {', '.join(traduzidos)}."
 
     return base
+
+
+def mensagem_alerta(
+    nivel_regra: str,
+    componentes: dict[str, float],
+    pred: dict | None = None,
+) -> str:
+    """Mensagem do alerta: a regra decide e explica; o modelo aparece como segunda opinião.
+
+    `pred` (opcional) traz {"nivel_risco_predito": str, "score_risco_predito": int}.
+    Níveis divergentes sinalizam caso ambíguo em vez de decidirem o alerta.
+    """
+    top = sorted(componentes.items(), key=lambda par: par[1], reverse=True)[:3]
+    fatores = [f"{nome} ({pontos:.0f} pts)" for nome, pontos in top]
+    mensagem = recomendar(nivel_regra, fatores)
+    if pred and pred.get("nivel_risco_predito") and pred["nivel_risco_predito"] != nivel_regra:
+        mensagem += (
+            f" Segunda opinião do modelo: {pred['nivel_risco_predito']} "
+            f"({pred.get('score_risco_predito', '—')}) — caso divergente, inspecione as "
+            "condições antes de confiar."
+        )
+    return mensagem

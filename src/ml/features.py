@@ -98,18 +98,28 @@ def calcular_features(dados: dict) -> dict:
     return row
 
 
+def componentes_regra(row: dict) -> dict[str, float]:
+    """Penalidades nomeadas da regra — decomposição auditável de score_regra.
+
+    As chaves são rótulos amigáveis (PT) usados na mensagem de alerta; os valores
+    são os pontos que cada termo soma ao score. `score_regra` é a soma destes
+    termos — fonte única da fórmula, sem duplicação.
+    """
+    return {
+        "proximidade de água": max(0, 50 - row["proximidade_agua_m"] / 10),
+        "umidade do solo": row["umidade_solo_pct"] * 0.25,
+        "precipitação": row["precipitacao_mm"] * 0.35,
+        "tipo de solo": row["tipo_solo_encoded"] * 5,
+        "declividade": row["declividade_graus"] * 1.5,
+        "velocidade de operação": row["velocidade_operacao_kmh"] * (1.2 if row["tipo_operacao"] == "Campo" else 0.2),
+        "carga": row["carga_pct"] * 0.15,
+        "histórico de incidentes": row["historico_incidentes"] * 7,
+        "manutenção atrasada": max(0, row["dias_ultima_manutencao"] - 30) * 0.3,
+        "horas de uso": max(0, row["horas_uso_equipamento"] - 3000) / 200,
+        "visibilidade": max(0, 1000 - row["visibilidade_m"]) * 0.01,
+    }
+
+
 def score_regra(row: dict) -> int:
     """Score de risco heuristico deterministico (inferencia em tempo real)."""
-    score = 0
-    score += max(0, 50 - row["proximidade_agua_m"] / 10)
-    score += row["umidade_solo_pct"] * 0.25
-    score += row["precipitacao_mm"] * 0.35
-    score += row["tipo_solo_encoded"] * 5
-    score += row["declividade_graus"] * 1.5
-    score += row["velocidade_operacao_kmh"] * (1.2 if row["tipo_operacao"] == "Campo" else 0.2)
-    score += row["carga_pct"] * 0.15
-    score += row["historico_incidentes"] * 7
-    score += max(0, row["dias_ultima_manutencao"] - 30) * 0.3
-    score += max(0, row["horas_uso_equipamento"] - 3000) / 200
-    score += max(0, 1000 - row["visibilidade_m"]) * 0.01
-    return int(min(100, max(0, score)))
+    return int(min(100, max(0, sum(componentes_regra(row).values()))))

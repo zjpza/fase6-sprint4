@@ -8,7 +8,7 @@ O que cada perfil vê, com que critério o sistema alerta e as capturas das trê
 | Print | Perfil | O que mostra |
 |---|---|---|
 | [`01-gestor-frota.png`](../assets/prints/01-gestor-frota.png) | Fernanda (Gestor de Frota) | KPIs da frota, mapa de risco por região, distribuição por nível, evolução do risco médio, **tendência por região**, **score médio por tipo de operação**, critérios de risco e tabela com risco (regra) × risco (ML) |
-| [`02-operador-campo.png`](../assets/prints/02-operador-campo.png) | Carlos (Operador) | Status do equipamento, **score da regra × score do modelo (com delta)**, **fatores que pesaram na predição**, alerta que cita as causas reais, condições atuais e histórico de score |
+| [`02-operador-campo.png`](../assets/prints/02-operador-campo.png) | Carlos (Operador) | Status do equipamento, **score da regra × score do modelo (com delta)**, **fatores que pesaram na predição**, **alerta com as penalidades da regra (N pts) e a segunda opinião do modelo em caso divergente**, condições atuais e histórico de score |
 | [`03-analista-seguradora.png`](../assets/prints/03-analista-seguradora.png) | Ricardo (Analista) | Histórico auditável de alertas + **trilha de auditoria** (quem acessou, o que o sistema decidiu) com exportação CSV |
 
 Como as capturas foram feitas: dashboard rodando de verdade contra a API, com
@@ -26,10 +26,13 @@ O mesmo critério aparece na tela (`Critério de classificação`) e vale para r
 | 51-75 | Alto |
 | 76-100 | Crítico |
 
-- **Alerta preventivo** é emitido quando o nível é **Alto** ou **Crítico** — o operador vê
-  `Risco (regra)` e `Risco (ML)` lado a lado justamente para perceber quando discordam.
-- O texto do alerta cita os **fatores que pesaram no registro**, não uma causa fixa (antes dizia
-  sempre "proximidade de água e umidade do solo", mesmo quando nenhuma das duas pesava).
+- **Alerta preventivo** é emitido quando o nível **da regra** é **Alto** ou **Crítico** (a regra
+  é a fonte única de decisão; suas penalidades nomeadas compõem a mensagem do alerta). O modelo
+  é **segunda opinião**: quando os níveis divergem, a mensagem cita "Segunda opinião do modelo:
+  <nível> (<score>)" e o caso é marcado como ambíguo.
+- O texto do alerta cita as **penalidades da regra com os pontos de cada uma** (ex.: "declividade
+  (16 pts)"), não uma causa fixa (antes dizia sempre "proximidade de água e umidade do solo",
+  mesmo quando nenhuma das duas pesava).
 - `score_risco` (regra) e `score_risco_predito` (modelo) compartilham a escala 0-100 — detalhes
   em [`ml-score-e-fatores.md`](ml-score-e-fatores.md).
 

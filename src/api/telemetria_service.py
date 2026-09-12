@@ -12,11 +12,12 @@ from ml.features import (
     SOLO_ENCODER,
     calcular_features,
     classificar_risco,
+    componentes_regra,
     faixa_proximidade,
     score_regra,
 )
 from ml.predictor import RiskPredictor
-from ml.recomendacao import recomendar
+from ml.recomendacao import mensagem_alerta
 
 # Identifica no banco que o registro veio da coleta ao vivo (não da carga do ETL).
 FONTE_API = "api"
@@ -118,12 +119,11 @@ def _inserir_alerta(
     id_equipamento: str,
     nivel: str,
     score: int,
-    fatores: str | list[str] | None = None,
+    mensagem: str,
 ) -> None:
-    """Grava o alerta de risco Alto/Crítico com os fatores que pesaram na predição."""
+    """Grava o alerta de risco Alto/Crítico da REGRA (fonte única de decisão)."""
     if nivel not in ("Alto", "Crítico"):
         return
-    mensagem = recomendar(nivel, fatores)
     tipo_alerta = "Crítico" if nivel == "Crítico" else "Preventivo"
     cursor = conn.cursor()
     cursor.execute(
@@ -171,13 +171,22 @@ def processar_telemetria(conn: sqlite3.Connection, dados: dict, predictor: RiskP
     pred["id_equipamento"] = row["id_equipamento"]
 
     _inserir_score_modelo(conn, pred)
+    componentes = componentes_regra(row)
+    msg = mensagem_alerta(
+        row["nivel_risco"],
+        componentes,
+        {
+            "nivel_risco_predito": pred["nivel_risco_predito"],
+            "score_risco_predito": pred["score_risco_predito"],
+        },
+    )
     _inserir_alerta(
         conn,
         id_registro,
         row["id_equipamento"],
-        pred["nivel_risco_predito"],
-        pred["score_risco_predito"],
-        pred["fatores_principais"],
+        row["nivel_risco"],
+        row["score_risco"],
+        msg,
     )
     conn.commit()
 
@@ -191,7 +200,8 @@ def processar_telemetria(conn: sqlite3.Connection, dados: dict, predictor: RiskP
         "score_risco_predito": pred["score_risco_predito"],
         "nivel_risco_predito": pred["nivel_risco_predito"],
         "alerta_predito": bool(pred["alerta_predito"]),
-        "recomendacao": recomendar(pred["nivel_risco_predito"], fatores),
+        "divergente": bool(row["nivel_risco"] != pred["nivel_risco_predito"]),
+        "recomendacao": msg,
         "fatores_principais": fatores,
         "data_hora": row["data_hora"],
     }

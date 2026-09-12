@@ -21,8 +21,8 @@ registra não só acessos, mas **o que o sistema decidiu**.
    existir segredo padrão conhecido.
 2. **`.env.example` sanitizado**: só placeholder e a instrução para gerar um segredo de 32+ bytes.
 3. **Decisão registrada na auditoria**: cada telemetria processada grava `decisao_risco` com
-   `score_regra`, `nivel_regra`, `score_modelo`, `nivel_modelo`, `alerta` e `fatores` — a trilha
-   responde "quem acessou, quando e o que o sistema decidiu".
+   `score_regra`, `nivel_regra`, `score_modelo`, `nivel_modelo`, `alerta` (decisão da regra),
+   `divergente` e `fatores` — a trilha responde "quem acessou, quando e o que o sistema decidiu".
 4. **`GET /api/v1/auditoria`** (Gestor de Frota e Analista; operador recebe 403): lista os eventos
    com usuário, ação, recurso, equipamento/registro, IP e detalhes, com filtro por `acao` e
    paginação de 1 a 1000. A própria consulta é auditada (`listar_auditoria`).
@@ -34,16 +34,21 @@ registra não só acessos, mas **o que o sistema decidiu**.
 ### Trilha de auditoria (consulta real pelo analista)
 
 ```
-GET /api/v1/auditoria?limit=4&acao=decisao_risco   (ricardo@sompo.local)
+GET /api/v1/auditoria?acao=decisao_risco&limit=2   (ricardo@sompo.local)
 
-2026-09-12T05:17:10 | Carlos Silva | decisao_risco |
-  score_regra=58 nivel_regra=Alto score_modelo=33 nivel_modelo=Médio alerta=0
+2026-09-12T19:33:20 | Carlos Silva | decisao_risco |
+  score_regra=58 nivel_regra=Alto score_modelo=33 nivel_modelo=Médio alerta=1 divergente=1
   fatores=velocidade_operacao_kmh,faixa_proximidade_encoded,historico_incidentes
-2026-09-12T05:17:10 | Carlos Silva | decisao_risco |
-  score_regra=81 nivel_regra=Crítico score_modelo=55 nivel_modelo=Alto alerta=1
-  fatores=velocidade_operacao_kmh,dias_ultima_manutencao,proximidade_agua_m
+2026-09-12T19:33:13 | Carlos Silva | decisao_risco |
+  score_regra=100 nivel_regra=Crítico score_modelo=84 nivel_modelo=Crítico alerta=1 divergente=0
+  fatores=umidade_solo_pct,faixa_proximidade_encoded,tipo_solo_encoded
 ip registrado: 127.0.0.1
 ```
+
+`alerta=` é a decisão da **regra** (fonte única) e `divergente=` sinaliza que regra e modelo
+classificaram o registro em níveis diferentes — o caso ambíguo que o auditor precisa ver.
+No exemplo, o primeiro registro é um alerta Alto da regra que o modelo classificaria como
+Médio: na Sprint 3 esse alerta apareceria com `alerta=0` e nunca entraria no histórico.
 
 ### Segredo
 
@@ -64,8 +69,9 @@ RuntimeWarning: JWT_SECRET_KEY não definida — usando segredo aleatório só d
 | `test_decisao_de_risco_fica_na_auditoria` | A decisão (scores, alerta, fatores) entra na trilha |
 | `test_auditoria_consultavel_para_gestor_e_analista` | Consulta legível, filtro por ação funcionando |
 | `test_operador_nao_acessa_a_trilha_de_auditoria` | RBAC da trilha (403 para operador) |
+| `test_alerta_do_historico_segue_a_regra_mesmo_divergindo` | O alerta do histórico segue a regra (fonte única) com `divergente=` coerente na trilha |
 
-**65 → 72 testes passando.**
+**65 → 72 testes nesta issue; suite atual: 80 testes passando.**
 
 ## Decisões
 

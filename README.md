@@ -353,7 +353,7 @@ O dashboard consome a API REST autenticada via JWT — não lê o banco diretame
 
 ### Testes automatizados
 
-A suite pytest (76 casos) cobre funções puras, endpoints com RBAC, ETL e o fluxo completo — resumo em [`docs/evidencias-mvp.md`](docs/evidencias-mvp.md):
+A suite pytest (80 casos) cobre funções puras, endpoints com RBAC, ETL e o fluxo completo — resumo em [`docs/evidencias-mvp.md`](docs/evidencias-mvp.md):
 
 ```bash
 # Com o venv ativado
@@ -363,10 +363,10 @@ python -m pytest tests/ -v
 | Arquivo | Cobertura |
 |---------|-----------|
 | `tests/conftest.py` | Fixtures: banco SQLite temporário por teste, override de `get_db`, `TestClient` com `RiskPredictor` |
-| `tests/test_unit.py` | `faixa_proximidade`, `classificar_risco`, `score_regra`, `score_continuo` (ponderado pelas probabilidades), `_calcular_features`, inferência do modelo (fatores por contribuição e continuidade do score) |
-| `tests/test_api.py` | Login (200/401), `/me`, POST `/telemetria` (201/401/403/409/422), RBAC por papel, coleta reenviada sem duplicar, rajada com consistência de totais, payload malformado sem gravação parcial, token expirado/forjado, injeção no identificador, GET `/telemetria` com filtragem e validação de `limit`, `/auditoria` com RBAC e filtro por ação, `/equipamentos`, `/alertas`, `/health` |
-| `tests/test_etl.py` | Carga idempotente (recarga não duplica nem insere 0), higienização por motivo (faltante, duplicado, domínio, faixa, incoerência), rastreabilidade `fonte`/`id_coleta`, migração de base legada |
-| `tests/test_e2e.py` | Fluxo completo em diretório temporário: ETL → API contra o banco gerado → score → alerta → auditoria, e recarga do ETL sem duplicar |
+| `tests/test_unit.py` (23) | `faixa_proximidade`, `classificar_risco`, `score_regra`, `score_continuo` (ponderado pelas probabilidades), `_calcular_features`, **`componentes_regra` (soma o score da regra e ordena as penalidades reais)**, **`mensagem_alerta` (penalidades + segunda opinião do modelo)**, inferência do modelo (fatores por contribuição e continuidade do score) |
+| `tests/test_api.py` (38) | Login (200/401), `/me`, POST `/telemetria` (201/401/403/409/422), RBAC por papel, coleta reenviada sem duplicar, rajada com consistência de totais, payload malformado sem gravação parcial, token expirado/forjado, injeção no identificador, GET `/telemetria` com filtragem e validação de `limit`, `/auditoria` com RBAC e filtro por ação, **alerta do histórico segue a regra mesmo divergindo**, `/equipamentos`, `/alertas`, `/health` |
+| `tests/test_etl.py` (16) | Carga idempotente (recarga não duplica nem insere 0), higienização por motivo (faltante, duplicado, domínio, faixa, incoerência), rastreabilidade `fonte`/`id_coleta`, migração de base legada |
+| `tests/test_e2e.py` (3) | Fluxo completo em diretório temporário: ETL → API contra o banco gerado → score → **alerta da regra persistido no histórico com nível/score/mensagem** → auditoria, e recarga do ETL sem duplicar |
 
 Os testes usam `TestClient` (FastAPI) em processo — não exigem API rodando. O banco é recriado em arquivo temporário a cada teste, garantindo isolamento.
 
@@ -380,6 +380,8 @@ Os testes usam `TestClient` (FastAPI) em processo — não exigem API rodando. O
 - **Auditoria**: tabela `auditoria` registra chamadas à API (login, telemetria, consultas) **e as decisões do sistema** (`decisao_risco` com score da regra, score do modelo, alerta e fatores), com usuário, ação, recurso, IP e timestamp. A trilha é consultável por Gestor/Analista em `GET /api/v1/auditoria`.
 - **Validação**: modelos Pydantic com `Field(..., ge=, le=, pattern=)` sanitizam e validam entradas antes da persistência.
 - **Dashboard**: o dashboard Streamlit exige login JWT para acessar qualquer visão. O papel do usuário autenticado determina a visão exibida (Operador, Gestor ou Analista) — não há seleção manual de persona.
+- **Auditoria**: tabela `auditoria` registra chamadas à API (login, telemetria, consultas) **e as decisões do sistema** (`decisao_risco` com score da regra, score do modelo, alerta da regra, divergência regra×modelo e fatores), com usuário, ação, recurso, IP e timestamp. A trilha é consultável por Gestor/Analista em `GET /api/v1/auditoria`.
+
 
 ---
 
@@ -396,6 +398,7 @@ Os testes usam `TestClient` (FastAPI) em processo — não exigem API rodando. O
 | **Retreino com revisão de features por cross-validation** | Cortar variáveis redundantes com número, não com intuição (11 features vs 13) | [`src/ml/relatorio_metricas.md`](src/ml/relatorio_metricas.md) |
 | **Retry com backoff no coletor e 409 para coleta repetida** | Coleta de campo tem falha de rede e reenvio; nada pode entrar sem score ou duplicado | [`docs/integracao-coleta.md`](docs/integracao-coleta.md) |
 | **Segredo JWT por env com fallback efêmero** (nada de constante no código) | Eliminar credencial versionada (achado B10) sem impedir a demonstração | [`docs/seguranca-auditoria.md`](docs/seguranca-auditoria.md) |
+| **Regra decide o alerta; modelo = segunda opinião** | Uma fonte única de decisão impede alerta na tela sem registro na trilha (e vice-versa); divergência vira sinal de caso ambíguo | [`docs/ml-score-e-fatores.md`](docs/ml-score-e-fatores.md) |
 | **Auditoria registra decisão, não só acesso** | A pergunta de auditoria é "o que o sistema decidiu e por quê", não apenas "quem entrou" | `GET /api/v1/auditoria` |
 | **Mapa com `scatter_geo`** em vez de tiles de rua | Tiles externos + WebGL deixavam o mapa em branco em print/navegador sem WebGL | [`docs/dashboard-relatorios.md`](docs/dashboard-relatorios.md) |
 | **`sompo.db` fora do versionamento** | Banco é artefato gerado; o ETL é o passo reproduzível | [`docs/evidencias-mvp.md`](docs/evidencias-mvp.md) |

@@ -191,13 +191,14 @@ def _enviar_com_retry(
 
 
 def _imprimir_resultado(resp: httpx.Response, id_equipamento: str) -> None:
-    """Imprime a linha de saída no formato: EQ-... -> score (nivel) | predito (nivel) | alerta SIM/NÃO."""
+    """Imprime a linha de saída: EQ-... -> score (nivel) | predito (nivel) | alerta SIM/NÃO | divergente."""
     data = resp.json()
-    alerta = "SIM" if data.get("alerta_predito") else "NÃO"
+    alerta = "SIM" if data.get("alerta_gerado") else "NÃO"
+    divergente = " | divergente" if data.get("divergente") else ""
     print(
         f"{id_equipamento} -> {data['score_risco']} ({data['nivel_risco']}) | "
         f"predito {data['score_risco_predito']} ({data['nivel_risco_predito']}) | "
-        f"alerta {alerta}"
+        f"alerta {alerta}{divergente}"
     )
 
 
