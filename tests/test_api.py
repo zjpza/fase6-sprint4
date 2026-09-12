@@ -123,7 +123,11 @@ def test_get_alertas(client):
     _post_telemetria(client, token, TELEMETRIA_PAYLOAD)
     resp = client.get("/api/v1/alertas", headers=_auth(token))
     assert resp.status_code == 200
-    assert isinstance(resp.json(), list)
+    alertas = resp.json()
+    assert isinstance(alertas, list) and alertas
+    # Campos que o dashboard lê para montar o histórico do analista (tipo_alerta faltava aqui).
+    assert {"id_alerta", "id_equipamento", "nivel_risco", "score_risco", "mensagem", "tipo_alerta"} <= set(alertas[0])
+    assert alertas[0]["tipo_alerta"] in ("Preventivo", "Crítico")
 
 
 def test_health(client):
