@@ -436,6 +436,23 @@ continua sendo o formulário normal.
 Roteiro cena a cena, com os comandos e o que mostrar em cada momento:
 [`docs/roteiro-video.md`](docs/roteiro-video.md).
 
+> **Acesso:** o repositório está **público** por decisão do grupo — o link do GitHub fica disponível
+> para a tutoria sem convite (o enunciado prevê o link direto nesse caso).
+
+---
+
+## ✅ Checklist da Entrega
+
+| Item | Situação |
+|---|---|
+| MVP integrado rodando ponta a ponta (issues #1-#8) | ✅ fechado, com evidências em `docs/` |
+| Prints das três visões em `assets/prints/` | ✅ versão final capturada do dashboard rodando |
+| Diagrama de arquitetura da solução entregue | ✅ `assets/diagrama_arquitetura.png` (fonte `.mmd`) |
+| README consolidado com decisões e evidências | ✅ este arquivo + `docs/` |
+| Suite de testes verde | ✅ `python -m pytest tests/ -q` → 76 passed |
+| Vídeo (≤5 min, não listado, fluxo na tela) | ⏳ gravar e publicar seguindo `docs/roteiro-video.md`; colar o link em **Apresentação em Vídeo** |
+| Repositório para a tutoria | ✅ público (link direto) — decisão do grupo |
+
 ---
 
 ## 📋 Licença
