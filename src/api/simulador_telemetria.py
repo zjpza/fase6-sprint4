@@ -25,6 +25,18 @@ CREDENCIAIS = {
     "gestor": {"email": "fernanda@agrorisk.local", "senha": "gestor123"},
 }
 
+
+def _normalizar_base_url(base_url: str) -> str:
+    """Normaliza a URL base para apontar ao prefixo da API (/api/v1).
+
+    Aceita tanto ``http://host:porta`` quanto ``http://host:porta/api/v1`` —
+    corrige o 404 de quem passou a raiz sem o prefixo (achado B3 da auditoria).
+    """
+    base = base_url.rstrip("/")
+    if base.endswith("/api/v1"):
+        return base
+    return f"{base}/api/v1"
+
 # Campos do payload TelemetriaInput na ordem esperada pela API.
 PAYLOAD_FIELDS = [
     "id_equipamento",
@@ -96,6 +108,7 @@ def main() -> None:
     parser.add_argument("--role", default="gestor", choices=list(CREDENCIAIS), help="Papel para autenticação")
     args = parser.parse_args()
 
+    base_url = _normalizar_base_url(args.base_url)
     cred = CREDENCIAIS[args.role]
 
     # Constrói o pool de registros a partir do dataset determinístico (SEED=42).
@@ -106,18 +119,18 @@ def main() -> None:
     registros = df.to_dict(orient="records")
 
     with httpx.Client(timeout=30.0) as client:
-        token = _login(client, args.base_url, cred["email"], cred["senha"])
+        token = _login(client, base_url, cred["email"], cred["senha"])
 
         for i, row in enumerate(registros):
             payload = _montar_payload(row)
             id_eq = payload["id_equipamento"]
 
-            resp = _postar_telemetria(client, args.base_url, token, payload)
+            resp = _postar_telemetria(client, base_url, token, payload)
 
             if resp.status_code == 401:
                 # Token expirado — re-login e retry uma vez.
-                token = _login(client, args.base_url, cred["email"], cred["senha"])
-                resp = _postar_telemetria(client, args.base_url, token, payload)
+                token = _login(client, base_url, cred["email"], cred["senha"])
+                resp = _postar_telemetria(client, base_url, token, payload)
 
             if resp.status_code == 201:
                 _imprimir_resultado(resp, id_eq)

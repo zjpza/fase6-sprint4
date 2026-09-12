@@ -1,3 +1,9 @@
+"""Pipeline de ETL: schema → dataset simulado → features → carga no banco.
+
+Executável de duas formas, a partir da raiz do projeto:
+- ``python src/data/pipeline.py``
+- ``python -m src.data.pipeline``
+"""
 from __future__ import annotations
 
 import sqlite3
@@ -7,8 +13,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from feature_engineering import OUTPUT_PATH, RAW_PATH, criar_features, salvar_scaler, validar_features
-from generate_dataset import OUTPUT_PATH as RAW_OUTPUT, gerar_dataset
+# Bootstrap para que `data.*` e `ml.*` resolvam nos dois modos de execução,
+# sem depender de cwd=src/data (achado B4 da auditoria).
+SRC = Path(__file__).resolve().parents[1]
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from data.feature_engineering import OUTPUT_PATH, RAW_PATH, criar_features, salvar_scaler, validar_features  # noqa: E402
+from data.generate_dataset import OUTPUT_PATH as RAW_OUTPUT, gerar_dataset  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = ROOT / "sompo.db"
@@ -44,9 +56,18 @@ def gerar_dados_brutos(n_registros: int = 1000) -> pd.DataFrame:
 
 
 def processar_features() -> pd.DataFrame:
-    """Executa o feature engineering e salva artefatos."""
+    """Executa o feature engineering sobre o CSV bruto e salva os artefatos.
+
+    Falha com mensagem clara se o CSV estiver ausente ou malformado —
+    sem traceback cru no ponto de contato com o arquivo (spec #2).
+    """
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    df_raw = pd.read_csv(RAW_OUTPUT, parse_dates=["data_hora"])
+    if not RAW_OUTPUT.exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {RAW_OUTPUT}. Rode gerar_dados_brutos primeiro.")
+    try:
+        df_raw = pd.read_csv(RAW_OUTPUT, parse_dates=["data_hora"])
+    except (ValueError, pd.errors.ParserError) as exc:
+        raise ValueError(f"CSV bruto inválido ({RAW_OUTPUT}): {exc}") from exc
     df_features = criar_features(df_raw)
     validar_features(df_features)
     salvar_scaler(df_features)

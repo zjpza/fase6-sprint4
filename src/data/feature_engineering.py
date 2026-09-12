@@ -1,3 +1,4 @@
+"""Engenharia de features de risco: deriva, valida e persiste artefatos de ML."""
 from __future__ import annotations
 
 import pickle
@@ -8,13 +9,14 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 
-from generate_dataset import calcular_score
+# Bootstrap para que `data.*` e `ml.*` resolvam independente do cwd (achado B4).
+SRC = Path(__file__).resolve().parents[1]
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
 
-# Bootstrap para importar ml.features quando executado via `python src/data/...`.
-_SRC = Path(__file__).resolve().parents[1]
-if str(_SRC) not in sys.path:
-    sys.path.insert(0, str(_SRC))
+from data.generate_dataset import calcular_score  # noqa: E402
 
+# Encoders e faixas: fonte única de verdade compartilhada com a inferência.
 from ml.features import (  # noqa: E402
     FAIXA_ENCODER,
     OPERACAO_ENCODER,
@@ -29,7 +31,9 @@ OUTPUT_PATH = ROOT / "data" / "processed" / "features.csv"
 SCALER_PATH = Path(__file__).resolve().parent / "scaler.pkl"
 ENCODERS_PATH = Path(__file__).resolve().parent / "label_encoders.pkl"
 
+
 def criar_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Deriva as features de risco (encoders, índices compostos e scores) do dataset bruto."""
     df = df.copy()
     df["tipo_solo_encoded"] = df["tipo_solo"].map(SOLO_ENCODER).astype(int)
     df["tipo_operacao_encoded"] = df["tipo_operacao"].map(OPERACAO_ENCODER).astype(int)
@@ -62,6 +66,7 @@ def criar_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def salvar_scaler(df: pd.DataFrame) -> None:
+    """Ajusta o MinMaxScaler e persiste scaler + encoders para reuso na inferência."""
     colunas_para_escalar = [
         "proximidade_agua_m",
         "precipitacao_mm",
@@ -98,13 +103,34 @@ def salvar_scaler(df: pd.DataFrame) -> None:
 
 
 def validar_features(df: pd.DataFrame) -> None:
-    assert not df.isna().any().any()
-    assert df["score_risco"].between(0, 100).all()
-    assert df["diff_score"].max() <= 6
-    assert not ((df["alerta_gerado"]) & (df["nivel_risco"] == "Baixo")).any()
+    """Valida consistência do DataFrame de features antes de persistir.
+
+    Levanta ``ValueError`` com TODOS os problemas nomeados de uma vez —
+    mensagens claras substituem ``assert`` (que some sob ``python -O``
+    e não diz qual coluna falhou).
+    """
+    problemas: list[str] = []
+
+    esperadas = ("score_risco", "diff_score", "alerta_gerado", "nivel_risco")
+    faltando = [col for col in esperadas if col not in df.columns]
+    if faltando:
+        problemas.append(f"colunas ausentes: {', '.join(faltando)}")
+    if "score_risco" in df.columns and not df["score_risco"].between(0, 100).all():
+        problemas.append("score_risco fora da faixa [0, 100]")
+
+    if "diff_score" in df.columns and float(df["diff_score"].max()) > 6:
+        problemas.append("diff_score acima do limite de 6 (score calculado divergiu do rótulo)")
+
+    if "alerta_gerado" in df.columns and "nivel_risco" in df.columns:
+        if ((df["alerta_gerado"]) & (df["nivel_risco"] == "Baixo")).any():
+            problemas.append("alerta_gerado=True com nivel_risco=Baixo (classificação inconsistente)")
+
+    if problemas:
+        raise ValueError("Falha na validação de features: " + "; ".join(problemas))
 
 
 def main() -> None:
+    """Executa o feature engineering standalone a partir do CSV bruto em data/raw."""
     if not RAW_PATH.exists():
         raise FileNotFoundError(f"Arquivo não encontrado: {RAW_PATH}. Rode generate_dataset.py primeiro.")
 
