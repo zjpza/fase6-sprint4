@@ -1,8 +1,10 @@
 from __future__ import annotations
 import os
+import secrets
 import sqlite3
 import warnings
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import jwt
 from fastapi import Depends, HTTPException, status
@@ -11,18 +13,51 @@ from passlib.context import CryptContext
 
 from api.database import get_db
 
-_DEFAULT_SECRET = "agrorisk-dev-secret-change-me-32b"
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", _DEFAULT_SECRET)
-if SECRET_KEY == _DEFAULT_SECRET:
-    warnings.warn(
-        "JWT_SECRET_KEY nao definida — usando secret de desenvolvimento. "
-        "Defina JWT_SECRET_KEY (>=32 bytes) em producao via .env/variavel de ambiente.",
-        RuntimeWarning,
-        stacklevel=1,
-    )
+ROOT = Path(__file__).resolve().parents[2]
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+
+def _carregar_env() -> None:
+    """Carrega `.env` da raiz do projeto, se o python-dotenv estiver instalado."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv(ROOT / ".env", override=False)
+
+
+def _resolver_secret() -> str:
+    """Segredo de assinatura do JWT: variável de ambiente → `.env` → segredo efêmero.
+
+    Não existe segredo embutido no código: sem `JWT_SECRET_KEY` a API gera um
+    segredo aleatório por processo (tokens deixam de valer entre reinícios) e
+    avisa no log — o contrário do default fixo que era versionado (achado B10).
+    """
+    _carregar_env()
+    secret = os.getenv("JWT_SECRET_KEY")
+    if secret:
+        if len(secret) < 32:
+            warnings.warn(
+                "JWT_SECRET_KEY com menos de 32 bytes — use um segredo mais longo em produção.",
+                RuntimeWarning,
+                stacklevel=1,
+            )
+        return secret
+
+    efemero = secrets.token_urlsafe(32)
+    warnings.warn(
+        "JWT_SECRET_KEY não definida — usando segredo aleatório só deste processo. "
+        "Defina JWT_SECRET_KEY no .env (veja .env.example) para manter os tokens válidos "
+        "entre reinícios da API.",
+        RuntimeWarning,
+        stacklevel=1,
+    )
+    return efemero
+
+
+SECRET_KEY = _resolver_secret()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
