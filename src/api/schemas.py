@@ -7,6 +7,14 @@ from pydantic import BaseModel, Field, field_validator
 
 class TelemetriaInput(BaseModel):
     id_equipamento: str
+    id_coleta: int | None = Field(
+        None,
+        ge=0,
+        description=(
+            "Identificador da coleta na fonte (opcional). Quando informado, a mesma coleta "
+            "não é registrada duas vezes: repetir o envio devolve 409 com o registro existente."
+        ),
+    )
     tipo_operacao: str = Field(..., pattern="^(Campo|Transporte)$")
     latitude: float = Field(..., ge=-90, le=90)
     longitude: float = Field(..., ge=-180, le=180)
@@ -121,7 +129,7 @@ class TelemetriaHistoricoResponse(BaseModel):
     score_risco_predito: int | None = None
     nivel_risco_predito: str | None = None
     modelo_utilizado: str | None = None
-    fatores_principais: str | None = Field(
-        None,
-        description="JSON com as variáveis que mais pesaram na predição deste registro.",
+    fatores_principais: list[str] = Field(
+        default_factory=list,
+        description="Variáveis que mais pesaram na predição deste registro.",
     )

@@ -22,6 +22,25 @@ from ml.recomendacao import recomendar
 FONTE_API = "api"
 
 
+class ColetaDuplicada(Exception):
+    """A mesma coleta (fonte + id_coleta) já está no banco — evita registro duplicado."""
+
+    def __init__(self, id_registro: int) -> None:
+        super().__init__(f"coleta já registrada em id_registro={id_registro}")
+        self.id_registro = id_registro
+
+
+def _buscar_coleta(conn: sqlite3.Connection, id_coleta: int | None) -> int | None:
+    """Id do registro já gravado para esta coleta da API, se existir."""
+    if id_coleta is None:
+        return None
+    linha = conn.execute(
+        "SELECT id_registro FROM telemetria WHERE fonte = ? AND id_coleta = ?",
+        (FONTE_API, id_coleta),
+    ).fetchone()
+    return int(linha[0]) if linha is not None else None
+
+
 def _inserir_telemetria(conn: sqlite3.Connection, dados: dict) -> int:
     colunas = [
         "id_equipamento",
@@ -59,9 +78,10 @@ def _inserir_telemetria(conn: sqlite3.Connection, dados: dict) -> int:
         "diff_score",
     ]
     valores = [dados.get(col) for col in colunas]
-    # Procedência explícita: a coleta ao vivo não tem id de origem (id_coleta fica NULL).
-    colunas.append("fonte")
-    valores.append(FONTE_API)
+    # Procedência explícita: a coleta ao vivo identifica a fonte e, quando o cliente
+    # informa o id da coleta, guarda esse id (id_coleta nulo = coleta sem id de origem).
+    colunas.extend(["fonte", "id_coleta"])
+    valores.extend([FONTE_API, dados.get("id_coleta")])
     placeholders = ", ".join(["?"] * len(colunas))
     sql = f"INSERT INTO telemetria ({', '.join(colunas)}) VALUES ({placeholders})"
     cursor = conn.cursor()
@@ -116,7 +136,11 @@ def _inserir_alerta(
 
 
 def processar_telemetria(conn: sqlite3.Connection, dados: dict, predictor: RiskPredictor) -> dict:
-    """Fluxo completo: insere telemetria, calcula score, prediz e registra alerta."""
+    """Fluxo completo: insere telemetria, calcula score, prediz e registra alerta.
+
+    Coleta já registrada (mesma `fonte` + `id_coleta`) não entra de novo: levanta
+    ``ColetaDuplicada`` para a rota responder 409 com o registro existente.
+    """
     row = calcular_features(dados)
     row["data_hora"] = datetime.now().isoformat()
     row["score_risco"] = score_regra(row)
@@ -125,7 +149,19 @@ def processar_telemetria(conn: sqlite3.Connection, dados: dict, predictor: RiskP
     row["score_risco_calculado"] = row["score_risco"]
     row["diff_score"] = 0
 
-    id_registro = _inserir_telemetria(conn, row)
+    if row.get("id_coleta") is not None:
+        existente = _buscar_coleta(conn, row["id_coleta"])
+        if existente is not None:
+            raise ColetaDuplicada(existente)
+
+    try:
+        id_registro = _inserir_telemetria(conn, row)
+    except sqlite3.IntegrityError as exc:
+        # Corrida entre dois envios da mesma coleta: o índice único (fonte, id_coleta) barra.
+        existente = _buscar_coleta(conn, row.get("id_coleta"))
+        if existente is not None:
+            raise ColetaDuplicada(existente) from exc
+        raise
     row["id_registro"] = id_registro
 
     df = pd.DataFrame([row])

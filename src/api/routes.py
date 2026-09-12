@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import sqlite3
+import json
 import logging
+import sqlite3
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -17,7 +18,7 @@ from api.schemas import (
     TokenResponse,
     UserResponse,
 )
-from api.telemetria_service import processar_telemetria
+from api.telemetria_service import ColetaDuplicada, processar_telemetria
 from security.audit_logger import log
 from security.auth import authenticate, create_access_token, get_current_user
 from security.rbac import require_operador_or_gestor
@@ -197,7 +198,12 @@ def listar_telemetria(
     params.append(limit)
 
     cursor = db.execute(query, params)
-    rows = [dict(row) for row in cursor.fetchall()]
+    rows = []
+    for row in cursor.fetchall():
+        registro = dict(row)
+        # Mesmo contrato do POST: lista de variáveis, não o JSON cru da coluna.
+        registro["fatores_principais"] = json.loads(registro.get("fatores_principais") or "[]")
+        rows.append(registro)
 
     log(
         db,
@@ -250,6 +256,22 @@ def receber_telemetria(
     predictor = request.app.state.predictor
     try:
         resultado = processar_telemetria(db, payload.model_dump(), predictor)
+    except ColetaDuplicada as exc:
+        # Reenvio da mesma coleta: 409 com o registro que já existe, sem duplicar dado.
+        log(
+            db,
+            id_usuario=user["id_usuario"],
+            acao="telemetria_duplicada",
+            recurso="/api/v1/telemetria",
+            id_equipamento=payload.id_equipamento,
+            id_registro=exc.id_registro,
+            detalhes=f"id_coleta={payload.id_coleta} já registrado",
+            ip_origem=_get_client_ip(request),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Coleta {payload.id_coleta} já registrada (id_registro {exc.id_registro})",
+        )
     except Exception:
         logging.exception("Erro ao processar telemetria")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erro interno ao processar telemetria")
