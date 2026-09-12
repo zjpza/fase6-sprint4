@@ -1,6 +1,8 @@
 """Testes de integração dos endpoints da API com TestClient (login, RBAC, telemetria)."""
 from __future__ import annotations
 
+import pytest
+
 TELEMETRIA_PAYLOAD = {
     "id_equipamento": "EQ-MT-0023",
     "tipo_operacao": "Campo",
@@ -239,3 +241,92 @@ def test_telemetria_limit_no_teto_do_dashboard(client):
 
     assert resp.status_code == 200
     assert len(resp.json()) == 1
+
+
+# --- Sprint 4 (#5 INTEGRAÇÃO): confiabilidade da coleta ---
+
+def test_coleta_reenviada_nao_duplica_dado(client, db):
+    """Reenviar a mesma coleta (mesmo id_coleta) devolve 409 e não grava segunda vez."""
+    token = _login(client, *GESTOR)
+    payload = {**TELEMETRIA_PAYLOAD, "id_coleta": 4242}
+
+    primeira = _post_telemetria(client, token, payload)
+    segunda = _post_telemetria(client, token, payload)
+
+    assert primeira.status_code == 201
+    assert segunda.status_code == 409
+    assert str(primeira.json()["id_registro"]) in segunda.json()["detail"]
+
+    registros = db.execute(
+        "SELECT COUNT(*) FROM telemetria WHERE fonte = 'api' AND id_coleta = 4242"
+    ).fetchone()[0]
+    scores = db.execute(
+        "SELECT COUNT(*) FROM scores_modelo WHERE id_registro = ?", (primeira.json()["id_registro"],)
+    ).fetchone()[0]
+    assert (registros, scores) == (1, 1)
+
+
+def test_coleta_sem_id_explicito_continua_aceitando_envios(client, db):
+    """Sem id de coleta declarado, cada envio é uma medição (comportamento anterior preservado)."""
+    token = _login(client, *GESTOR)
+
+    for _ in range(2):
+        assert _post_telemetria(client, token, TELEMETRIA_PAYLOAD).status_code == 201
+
+    assert db.execute("SELECT COUNT(*) FROM telemetria WHERE id_coleta IS NULL").fetchone()[0] == 2
+
+
+def test_rajada_de_envios_persiste_tudo_com_score(client, db):
+    """Rajada (sem intervalo) não perde nem duplica: enviados = persistidos = com score."""
+    token = _login(client, *GESTOR)
+    total = 15
+
+    respostas = [
+        _post_telemetria(client, token, {**TELEMETRIA_PAYLOAD, "id_coleta": 7000 + i})
+        for i in range(total)
+    ]
+
+    assert [r.status_code for r in respostas] == [201] * total
+    persistidos = db.execute(
+        "SELECT COUNT(*) FROM telemetria WHERE id_coleta BETWEEN 7000 AND 8000"
+    ).fetchone()[0]
+    com_score = db.execute(
+        """
+        SELECT COUNT(*) FROM telemetria t
+        JOIN scores_modelo sm ON sm.id_registro = t.id_registro
+        WHERE t.id_coleta BETWEEN 7000 AND 8000
+        """
+    ).fetchone()[0]
+    assert (persistidos, com_score) == (total, total)
+
+
+@pytest.mark.parametrize(
+    "alteracao",
+    [
+        {"umidade_solo_pct": 150},          # fora da faixa
+        {"tipo_solo": "Vulcânico"},         # fora do domínio
+        {"latitude": 200},                  # coordenada impossível
+        {"historico_incidentes": -1},       # contagem negativa
+    ],
+    ids=["faixa", "dominio", "coordenada", "contagem"],
+)
+def test_payload_malformado_e_recusado_sem_gravar(client, db, alteracao: dict):
+    """Payload fora das regras devolve 422 e não deixa meia gravação no banco."""
+    token = _login(client, *GESTOR)
+    payload = {**TELEMETRIA_PAYLOAD, **alteracao, "id_coleta": 8001}
+
+    resp = _post_telemetria(client, token, payload)
+
+    assert resp.status_code == 422
+    assert db.execute("SELECT COUNT(*) FROM telemetria WHERE id_coleta = 8001").fetchone()[0] == 0
+
+
+def test_payload_sem_campo_obrigatorio_e_recusado(client, db):
+    """Campo obrigatório ausente é 422 — o registro não entra pela metade."""
+    token = _login(client, *GESTOR)
+    payload = {chave: valor for chave, valor in TELEMETRIA_PAYLOAD.items() if chave != "umidade_solo_pct"}
+
+    resp = _post_telemetria(client, token, payload)
+
+    assert resp.status_code == 422
+    assert db.execute("SELECT COUNT(*) FROM telemetria").fetchone()[0] == 0

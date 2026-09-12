@@ -3,9 +3,15 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pandas as pd
 import pytest
 
+from api.simulador_telemetria import (
+    _enviar_com_retry,
+    _montar_payload,
+    _selecionar_registros,
+)
 from ml.features import (
     FAIXAS_NIVEL as _FAIXAS_NIVEL,
     REPRESENTANTE_NIVEL as _REPRESENTANTE_NIVEL,
@@ -114,6 +120,124 @@ def test_calcular_features_campos():
         "risco_manutencao",
     ):
         assert chave in row
+
+
+class _RespostaFalsa:
+    """Resposta httpx mínima para exercitar o retry do simulador."""
+
+    def __init__(self, status_code: int, payload: dict | None = None) -> None:
+        self.status_code = status_code
+        self._payload = payload or {}
+        self.text = str(self._payload)
+
+    def json(self) -> dict:
+        return self._payload
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise httpx.HTTPStatusError("erro", request=None, response=None)  # type: ignore[arg-type]
+
+
+class _ClienteFalso:
+    """Cliente httpx de mentira: entrega respostas/exceções na ordem programada."""
+
+    def __init__(self, comportamentos: list) -> None:
+        self._comportamentos = list(comportamentos)
+        self.chamadas: list[str] = []
+
+    def post(self, url: str, **_kwargs) -> "_RespostaFalsa":
+        self.chamadas.append(url)
+        comportamento = self._comportamentos.pop(0)
+        if isinstance(comportamento, Exception):
+            raise comportamento
+        return comportamento
+
+
+CREDENCIAIS_TESTE = {"email": "gestor@teste.local", "senha": "senha"}
+PAYLOAD_TESTE = {"id_equipamento": "EQ-MT-0023", "id_coleta": 1}
+
+
+def test_simulador_repete_falha_transitoria():
+    """5xx é transitório: o registro é reenviado em vez de se perder."""
+    cliente = _ClienteFalso([_RespostaFalsa(500), _RespostaFalsa(201, {"id_registro": 1})])
+
+    resposta, _token, motivo = _enviar_com_retry(
+        cliente, "http://api", CREDENCIAIS_TESTE, PAYLOAD_TESTE, "token", espera_base=0
+    )
+
+    assert (resposta.status_code, motivo) == (201, "")
+    assert len(cliente.chamadas) == 2
+
+
+def test_simulador_repete_timeout_de_conexao():
+    """Falha de rede também é repetida antes de desistir."""
+    cliente = _ClienteFalso([httpx.ConnectTimeout("timeout"), _RespostaFalsa(201, {"id_registro": 2})])
+
+    resposta, _token, motivo = _enviar_com_retry(
+        cliente, "http://api", CREDENCIAIS_TESTE, PAYLOAD_TESTE, "token", espera_base=0
+    )
+
+    assert (resposta.status_code, motivo) == (201, "")
+    assert len(cliente.chamadas) == 2
+
+
+def test_simulador_desiste_apos_as_tentativas_e_reporta():
+    """Sem resposta depois das tentativas, a falha é reportada — não vira sucesso silencioso."""
+    cliente = _ClienteFalso([_RespostaFalsa(503), _RespostaFalsa(503), _RespostaFalsa(503)])
+
+    resposta, _token, motivo = _enviar_com_retry(
+        cliente, "http://api", CREDENCIAIS_TESTE, PAYLOAD_TESTE, "token", espera_base=0
+    )
+
+    assert resposta is None
+    assert "503" in motivo
+    assert len(cliente.chamadas) == 3
+
+
+def test_simulador_renova_token_expirado():
+    """401 renova o login e reenvia o mesmo registro."""
+    cliente = _ClienteFalso(
+        [
+            _RespostaFalsa(401),
+            _RespostaFalsa(200, {"access_token": "novo-token"}),
+            _RespostaFalsa(201, {"id_registro": 3}),
+        ]
+    )
+
+    resposta, token, motivo = _enviar_com_retry(
+        cliente, "http://api", CREDENCIAIS_TESTE, PAYLOAD_TESTE, "token-velho", espera_base=0
+    )
+
+    assert (resposta.status_code, token, motivo) == (201, "novo-token", "")
+    assert cliente.chamadas[1].endswith("/login")
+
+
+def test_simulador_envia_id_da_coleta_no_payload():
+    """O payload carrega o id da coleta para o reenvio ser reconhecido pela API."""
+    registros = _selecionar_registros(1, None)
+
+    payload = _montar_payload(registros[0])
+
+    assert payload["id_coleta"] == registros[0]["id_registro"]
+
+
+def test_lote_desloca_o_id_da_coleta():
+    """Lotes diferentes geram coletas diferentes para as mesmas medições."""
+    registros = _selecionar_registros(1, None)
+
+    primeiro = _montar_payload(registros[0], lote=0)["id_coleta"]
+    segundo = _montar_payload(registros[0], lote=1)["id_coleta"]
+
+    assert segundo != primeiro
+    assert segundo > primeiro
+
+
+def test_simulador_envia_no_equipamento_informado():
+    """--equipamento permite ao operador coletar para o próprio equipamento (que o dataset pode não sortear)."""
+    registros = _selecionar_registros(5, "EQ-MT-0023")
+
+    assert len(registros) == 5
+    assert {registro["id_equipamento"] for registro in registros} == {"EQ-MT-0023"}
 
 
 # --- Sprint 4 (#2 REFACT): correções da auditoria (B3, B4, validações) ---
