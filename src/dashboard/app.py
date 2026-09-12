@@ -14,7 +14,6 @@ Executar:  streamlit run src/dashboard/app.py
 """
 from __future__ import annotations
 
-import json
 import os
 
 import httpx
@@ -212,15 +211,9 @@ def pill(nivel: str) -> str:
 
 
 def _fatores_do_registro(registro: pd.Series) -> list[str]:
-    """Fatores da predição (JSON) daquele registro, tolerando linhas antigas sem predição."""
-    bruto = registro.get("fatores_principais")
-    if not isinstance(bruto, str) or not bruto.strip():
-        return []
-    try:
-        fatores = json.loads(bruto)
-    except json.JSONDecodeError:
-        return []
-    return [str(fator) for fator in fatores] if isinstance(fatores, list) else []
+    """Fatores da predição daquele registro; registro sem predição devolve lista vazia."""
+    fatores = registro.get("fatores_principais")
+    return list(fatores) if isinstance(fatores, list) else []
 
 
 def legenda_cores() -> None:
