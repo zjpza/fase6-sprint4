@@ -10,6 +10,7 @@ usuario autenticado via JWT:
   - Operador        -> foco em 1 equipamento + alerta com os fatores que pesaram (US-01)
   - Gestor de Frota -> overview da frota, mapa, tendencias e criterios de risco (US-04, US-05)
   - Analista        -> historico auditavel de alertas + trilha de decisoes + exportacao (US-07)
+  - Tecnico de Manutencao -> desgaste por equipamento + manutencao preventiva (perfil da Sprint 4)
 
 Executar:  streamlit run src/dashboard/app.py
 """
@@ -46,6 +47,7 @@ USUARIOS_DEMO = {
     "operador": {"nome": "Carlos", "email": "carlos@agrorisk.local", "senha": "operador123"},
     "gestor": {"nome": "Fernanda", "email": "fernanda@agrorisk.local", "senha": "gestor123"},
     "analista": {"nome": "Ricardo", "email": "ricardo@sompo.local", "senha": "analista123"},
+    "tecnico": {"nome": "Marcos", "email": "marcos@agrorisk.local", "senha": "tecnico123"},
 }
 
 CORES_RISCO = {
@@ -78,6 +80,7 @@ LABEL_PAPEL = {
     "Operador": "Operador",
     "GestorFrota": "Gestor de Frota",
     "AnalistaSeguradora": "Analista da Seguradora",
+    "TecnicoManutencao": "Técnico de Manutenção",
 }
 
 st.set_page_config(
@@ -642,6 +645,83 @@ def visao_analista() -> None:
     )
 
 
+def visao_tecnico(df: pd.DataFrame) -> None:
+    st.caption(
+        "Visão **Técnico de Manutenção** — desgaste e manutenção preventiva por "
+        "equipamento, com as penalidades da regra que vêm de manutenção."
+    )
+    atual = ultima_leitura_por_equipamento(df)
+    penalidades = [
+        (lambda c: c["horas de uso"] + c["manutenção atrasada"] + c["histórico de incidentes"])(
+            componentes_regra(calcular_features(row.to_dict()))
+        )
+        for _, row in atual.iterrows()
+    ]
+    atual = atual.assign(penal_manutencao=penalidades)
+
+    t1, t2, t3, t4 = st.columns(4)
+    t1.metric("Equipamentos monitorados", len(atual))
+    t2.metric("Manutenção atrasada (>30 dias)", int((atual["dias_ultima_manutencao"] > 30).sum()))
+    t3.metric("Alto desgaste (>3.000 h)", int((atual["horas_uso_equipamento"] > 3000).sum()))
+    t4.metric("Incidentes acumulados", int(atual["historico_incidentes"].sum()))
+
+    st.divider()
+    st.subheader("🔧 Ranking de desgaste e manutenção")
+    st.caption(
+        "Penalidade de manutenção = horas de uso + manutenção atrasada + histórico de "
+        "incidentes (`ml.features.componentes_regra`) — os termos da regra em que a "
+        "manutenção atua."
+    )
+    tabela = atual[
+        ["id_equipamento", "tipo_equipamento", "estado_uf", "horas_uso_equipamento",
+         "dias_ultima_manutencao", "historico_incidentes", "penal_manutencao",
+         "score_risco", "nivel_risco"]
+    ].sort_values("penal_manutencao", ascending=False)
+    tabela = tabela.rename(columns={
+        "id_equipamento": "Equipamento", "tipo_equipamento": "Tipo", "estado_uf": "Região",
+        "horas_uso_equipamento": "Horas de uso", "dias_ultima_manutencao": "Dias s/ manutenção",
+        "historico_incidentes": "Incidentes", "penal_manutencao": "Penalidade manut. (pts)",
+        "score_risco": "Score", "nivel_risco": "Risco (regra)",
+    })
+    st.dataframe(tabela, use_container_width=True, hide_index=True, column_config=config_tabela_risco())
+
+    st.divider()
+    st.subheader("📅 Manutenção recomendada agora")
+    recomendados = atual[
+        (atual["dias_ultima_manutencao"] > 30) | (atual["horas_uso_equipamento"] > 3000)
+    ].sort_values("penal_manutencao", ascending=False)
+    if recomendados.empty:
+        st.success("Nenhum equipamento exige manutenção agora.")
+    else:
+        st.caption("Critério: mais de 30 dias sem manutenção OU mais de 3.000 horas de uso — ordenado pela penalidade de manutenção.")
+        st.dataframe(
+            recomendados[["id_equipamento", "tipo_equipamento", "horas_uso_equipamento",
+                           "dias_ultima_manutencao", "historico_incidentes", "penal_manutencao"]]
+            .rename(columns={
+                "id_equipamento": "Equipamento", "tipo_equipamento": "Tipo",
+                "horas_uso_equipamento": "Horas de uso", "dias_ultima_manutencao": "Dias s/ manutenção",
+                "historico_incidentes": "Incidentes", "penal_manutencao": "Penalidade manut. (pts)",
+            }),
+            use_container_width=True, hide_index=True,
+        )
+
+    st.divider()
+    st.subheader("📊 Penalidades de manutenção (top 10)")
+    top10 = atual.nlargest(10, "penal_manutencao")
+    fig = px.bar(
+        top10.sort_values("penal_manutencao"),
+        x="id_equipamento", y="penal_manutencao",
+        labels={"id_equipamento": "Equipamento", "penal_manutencao": "Penalidade de manutenção (pts)"},
+    )
+    fig.update_layout(
+        height=320, margin=dict(l=0, r=0, t=10, b=0), xaxis_title="", yaxis_title="Pts",
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#e6e6e6",
+    )
+    st.plotly_chart(fig, use_container_width=True, config=PLOT_CONFIG)
+
+    criterios_de_risco()
+
+
 # --------------------------------------------------------------------------- #
 # Tela de login
 # --------------------------------------------------------------------------- #
@@ -786,6 +866,8 @@ def main() -> None:
         visao_gestor(df_f)
     elif role == "Operador":
         visao_operador(df_f)
+    elif role == "TecnicoManutencao":
+        visao_tecnico(df_f)
     else:
         visao_analista()
 

@@ -23,7 +23,7 @@ registra não só acessos, mas **o que o sistema decidiu**.
 3. **Decisão registrada na auditoria**: cada telemetria processada grava `decisao_risco` com
    `score_regra`, `nivel_regra`, `score_modelo`, `nivel_modelo`, `alerta` (decisão da regra),
    `divergente` e `fatores` — a trilha responde "quem acessou, quando e o que o sistema decidiu".
-4. **`GET /api/v1/auditoria`** (Gestor de Frota e Analista; operador recebe 403): lista os eventos
+4. **`GET /api/v1/auditoria`** (Gestor de Frota e Analista; operador e técnico de manutenção recebem 403): lista os eventos
    com usuário, ação, recurso, equipamento/registro, IP e detalhes, com filtro por `acao` e
    paginação de 1 a 1000. A própria consulta é auditada (`listar_auditoria`).
 5. **Escrita íntegra**: além das validações Pydantic, CHECK/FK e do gatilho de consistência já
@@ -69,9 +69,12 @@ RuntimeWarning: JWT_SECRET_KEY não definida — usando segredo aleatório só d
 | `test_decisao_de_risco_fica_na_auditoria` | A decisão (scores, alerta, fatores) entra na trilha |
 | `test_auditoria_consultavel_para_gestor_e_analista` | Consulta legível, filtro por ação funcionando |
 | `test_operador_nao_acessa_a_trilha_de_auditoria` | RBAC da trilha (403 para operador) |
+| `test_tecnico_le_a_frota_inteira` | Técnico de manutenção lê telemetria de toda a frota, equipamentos e alertas (não é filtrado por equipamento) |
+| `test_tecnico_nao_envia_telemetria` | RBAC da coleta (403 para técnico de manutenção) |
+| `test_tecnico_nao_acessa_a_trilha_de_auditoria` | RBAC da trilha (403 para técnico de manutenção) |
 | `test_alerta_do_historico_segue_a_regra_mesmo_divergindo` | O alerta do histórico segue a regra (fonte única) com `divergente=` coerente na trilha |
 
-**65 → 72 testes nesta issue; suite atual: 80 testes passando.**
+**65 → 72 testes nesta issue; suite atual: 83 testes passando.**
 
 ## Decisões
 

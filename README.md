@@ -2,6 +2,8 @@
 
 > **MVP funcional integrado para predição de risco operacional em frotas agrícolas.**
 
+[![CI](https://github.com/zjpza/fase6-sprint4/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/zjpza/fase6-sprint4/actions/workflows/ci.yml)
+
 ---
 
 ## 👨‍🎓 Integrantes
@@ -144,8 +146,9 @@ fase6-sprint4/
 │   │   ├── 02_modelagem.ipynb         # Treinamento do modelo
 │   │   ├── 03_avaliacao.ipynb         # Avaliação e métricas
 │   │   ├── 04_predict.py              # Script de predição standalone
-│   │   ├── train_model.py             # Treino + avaliação + relatório de métricas (Sprint 4)
-│   │   └── relatorio_metricas.md      # Relatório de métricas do modelo final
+│   │   ├── 05_validacao_valor_ml.py    # Experimentos: valor do modelo + sensibilidade dos pesos
+│   │   ├── train_model.py              # Treino + avaliação + relatório de métricas (Sprint 4)
+│   │   └── relatorio_metricas.md       # Relatório de métricas do modelo final
 │   ├── sql/                           # Schema, views, triggers e seeds
 │   │   ├── 01_schema.sql              # Tabelas: equipamentos, telemetria, scores, alertas, usuarios
 │   │   ├── 02_seed_data.sql           # Seeds: equipamentos demo, usuários com hashes bcrypt
@@ -157,7 +160,7 @@ fase6-sprint4/
 │   │   ├── rbac.py                    # require_role(), require_operador_or_gestor(), etc.
 │   │   └── audit_logger.py            # log() para tabela de auditoria
 │   └── dashboard/                     # Interface (Streamlit) — consome a API via JWT
-│       └── app.py                    # Login JWT + 3 visões por persona (papel do token)
+│       └── app.py                    # Login JWT + 4 visões por persona (papel do token)
 ├── tests/                             # Suite pytest (fixtures, testes unitários, API e ETL)
 │   ├── conftest.py                   # Fixtures: banco SQLite temporário + TestClient
 │   ├── test_unit.py                  # Funções puras (faixa, score, features)
@@ -173,10 +176,11 @@ fase6-sprint4/
 │   ├── dashboard-relatorios.md       # Critérios, personas e prints das visões (issue #7)
 │   ├── evidencias-mvp.md             # Suite, execução demonstrativa e User Stories (issue #8)
 │   └── roteiro-video.md              # Roteiro cena a cena do vídeo de entrega (issue #9)
-└── assets/                            # Diagrama de arquitetura e prints das telas
-    ├── diagrama_arquitetura.mmd      # Fonte Mermaid editável
-    ├── diagrama_arquitetura.png      # Imagem renderizada
-    └── prints/                       # Capturas das 3 visões do dashboard (issue #7)
+├── assets/                            # Diagrama de arquitetura e prints das telas
+│   ├── diagrama_arquitetura.mmd       # Fonte Mermaid editável
+│   ├── diagrama_arquitetura.png       # Imagem renderizada
+│   └── prints/                       # Capturas das 4 visões do dashboard (issue #7)
+└── .github/workflows/ci.yml           # CI: pytest a cada push/PR
 ```
 
 ---
@@ -333,6 +337,7 @@ Usuários de demonstração (senhas armazenadas como hash bcrypt no banco):
 | `carlos@agrorisk.local` | `operador123` | Operador | EQ-MT-0023 |
 | `fernanda@agrorisk.local` | `gestor123` | Gestor de Frota | — |
 | `ricardo@sompo.local` | `analista123` | Analista da Seguradora | — |
+| `marcos@agrorisk.local` | `tecnico123` | Técnico de Manutenção | — |
 
 ---
 
@@ -341,7 +346,7 @@ Usuários de demonstração (senhas armazenadas como hash bcrypt no banco):
 O dashboard consome a API REST autenticada via JWT — não lê o banco diretamente.
 
 1. Ao abrir, exibe tela de login (email + senha) no sidebar.
-2. Após autenticar, o papel do usuário (Operador, GestorFrota ou AnalistaSeguradora) determina a visão exibida — não há seleção manual de persona.
+2. Após autenticar, o papel do usuário (Operador, GestorFrota, AnalistaSeguradora ou TecnicoManutencao) determina a visão exibida — não há seleção manual de persona.
 3. Todos os dados (telemetria, equipamentos, alertas) são carregados via chamadas `GET` à API com header `Authorization: Bearer <token>`.
 4. O endpoint `GET /api/v1/telemetria` filtra automaticamente por equipamento quando o usuário é Operador.
 
@@ -350,10 +355,11 @@ O dashboard consome a API REST autenticada via JWT — não lê o banco diretame
 | Gestor de Frota | `GestorFrota` | Mapa de risco da frota, distribuição por nível, evolução temporal, tabela de equipamentos |
 | Operador | `Operador` | Status do equipamento próprio, alerta visual, condições atuais, histórico de score |
 | Analista da Seguradora | `AnalistaSeguradora` | Histórico auditável de alertas Alto/Crítico com exportação CSV |
+| Técnico de Manutenção | `TecnicoManutencao` | Ranking de desgaste, manutenção recomendada agora e penalidades de manutenção |
 
 ### Testes automatizados
 
-A suite pytest (80 casos) cobre funções puras, endpoints com RBAC, ETL e o fluxo completo — resumo em [`docs/evidencias-mvp.md`](docs/evidencias-mvp.md):
+A suite pytest (83 casos) cobre funções puras, endpoints com RBAC, ETL e o fluxo completo — resumo em [`docs/evidencias-mvp.md`](docs/evidencias-mvp.md):
 
 ```bash
 # Com o venv ativado
@@ -364,7 +370,7 @@ python -m pytest tests/ -v
 |---------|-----------|
 | `tests/conftest.py` | Fixtures: banco SQLite temporário por teste, override de `get_db`, `TestClient` com `RiskPredictor` |
 | `tests/test_unit.py` (23) | `faixa_proximidade`, `classificar_risco`, `score_regra`, `score_continuo` (ponderado pelas probabilidades), `_calcular_features`, **`componentes_regra` (soma o score da regra e ordena as penalidades reais)**, **`mensagem_alerta` (penalidades + segunda opinião do modelo)**, inferência do modelo (fatores por contribuição e continuidade do score) |
-| `tests/test_api.py` (38) | Login (200/401), `/me`, POST `/telemetria` (201/401/403/409/422), RBAC por papel, coleta reenviada sem duplicar, rajada com consistência de totais, payload malformado sem gravação parcial, token expirado/forjado, injeção no identificador, GET `/telemetria` com filtragem e validação de `limit`, `/auditoria` com RBAC e filtro por ação, **alerta do histórico segue a regra mesmo divergindo**, `/equipamentos`, `/alertas`, `/health` |
+| `tests/test_api.py` (41) | Login (200/401), `/me`, POST `/telemetria` (201/401/403/409/422), RBAC por papel, **RBAC do técnico (lê frota, não posta, não vê trilha)**, coleta reenviada sem duplicar, rajada com consistência de totais, payload malformado sem gravação parcial, token expirado/forjado, injeção no identificador, GET `/telemetria` com filtragem e validação de `limit`, `/auditoria` com RBAC e filtro por ação, **alerta do histórico segue a regra mesmo divergindo**, `/equipamentos`, `/alertas`, `/health` |
 | `tests/test_etl.py` (16) | Carga idempotente (recarga não duplica nem insere 0), higienização por motivo (faltante, duplicado, domínio, faixa, incoerência), rastreabilidade `fonte`/`id_coleta`, migração de base legada |
 | `tests/test_e2e.py` (3) | Fluxo completo em diretório temporário: ETL → API contra o banco gerado → score → **alerta da regra persistido no histórico com nível/score/mensagem** → auditoria, e recarga do ETL sem duplicar |
 
@@ -408,10 +414,10 @@ Os testes usam `TestClient` (FastAPI) em processo — não exigem API rodando. O
 ## 📊 User Stories Atendidas
 
 | ID | Persona | User Story | Como o MVP atende | Evidência |
-|----|---------|-----------|-------------------|-----------|
 | US-01 | Operador | Receber alerta visual antes de entrar em área de alto risco. | Alerta na tela com nível, score da regra × score do modelo e **fatores que pesaram**, gerado no POST e persistido na tabela `alertas` | `assets/prints/02-operador-campo.png` |
 | US-04 | Gestora | Visualizar em mapa o status de risco de cada equipamento. | Mapa com pontos por nível, KPIs da frota e tendências por região/tipo de operação | `assets/prints/01-gestor-frota.png` |
 | US-07 | Analista | Acessar histórico de alertas emitidos antes de um sinistro. | Histórico auditável de alertas com CSV + trilha de auditoria das decisões | `assets/prints/03-analista-seguradora.png` |
+| — | Técnico de Manutenção | (perfil citado no enunciado da Sprint 4) Acompanhar desgaste e manutenção preventiva. | Ranking de desgaste + "manutenção recomendada agora" com as penalidades da regra | assets/prints/04-tecnico-manutencao.png |
 
 Detalhamento das evidências por issue: [`docs/evidencias-mvp.md`](docs/evidencias-mvp.md).
 
@@ -422,12 +428,14 @@ Detalhamento das evidências por issue: [`docs/evidencias-mvp.md`](docs/evidenci
 Capturas das telas finais (dashboard rodando contra a API), com o score contínuo e os fatores
 da predição — detalhes e critérios em [`docs/dashboard-relatorios.md`](docs/dashboard-relatorios.md).
 
-| Gestor de Frota | Operador | Analista da Seguradora |
-|---|---|---|
-| ![Visão do gestor](assets/prints/01-gestor-frota.png) | ![Visão do operador](assets/prints/02-operador-campo.png) | ![Visão do analista](assets/prints/03-analista-seguradora.png) |
+| Gestor de Frota | Operador |
+|---|---|
+| ![Visão do gestor](assets/prints/01-gestor-frota.png) | ![Visão do operador](assets/prints/02-operador-campo.png) |
+| Analista da Seguradora | Técnico de Manutenção |
+| ![Visão do analista](assets/prints/03-analista-seguradora.png) | ![Visão do técnico](assets/prints/04-tecnico-manutencao.png) |
 
 Para capturar/gravar a demonstração entrando direto com um usuário de demonstração, suba o
-dashboard com `DASHBOARD_DEMO_LOGIN=gestor` (ou `operador`/`analista`) — sem a variável, o login
+dashboard com `DASHBOARD_DEMO_LOGIN=gestor` (ou `operador`/`analista`/`tecnico`) — sem a variável, o login
 continua sendo o formulário normal.
 
 ---
@@ -449,10 +457,11 @@ Roteiro cena a cena, com os comandos e o que mostrar em cada momento:
 | Item | Situação |
 |---|---|
 | MVP integrado rodando ponta a ponta (issues #1-#8) | ✅ fechado, com evidências em `docs/` |
-| Prints das três visões em `assets/prints/` | ✅ versão final capturada do dashboard rodando |
+| Prints das quatro visões em `assets/prints/` | ✅ versão final capturada do dashboard rodando |
 | Diagrama de arquitetura da solução entregue | ✅ `assets/diagrama_arquitetura.png` (fonte `.mmd`) |
 | README consolidado com decisões e evidências | ✅ este arquivo + `docs/` |
-| Suite de testes verde | ✅ `python -m pytest tests/ -q` → 76 passed |
+| Suite de testes verde | ✅ `python -m pytest tests/ -q` → 83 passed |
+| CI (pytest a cada push/PR) | ✅ `.github/workflows/ci.yml` — badge no topo |
 | Vídeo (≤5 min, não listado, fluxo na tela) | ⏳ gravar e publicar seguindo `docs/roteiro-video.md`; colar o link em **Apresentação em Vídeo** |
 | Repositório para a tutoria | ✅ público (link direto) — decisão do grupo |
 

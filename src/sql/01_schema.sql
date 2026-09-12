@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     nome TEXT NOT NULL,
     email TEXT UNIQUE,
     senha_hash TEXT,
-    role TEXT NOT NULL CHECK(role IN ('Operador', 'GestorFrota', 'AnalistaSeguradora')),
+    role TEXT NOT NULL CHECK(role IN ('Operador', 'GestorFrota', 'AnalistaSeguradora', 'TecnicoManutencao')),
     id_equipamento_acesso TEXT,
     ativo INTEGER DEFAULT 1 CHECK(ativo IN (0, 1)),
     data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

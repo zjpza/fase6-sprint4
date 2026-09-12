@@ -7,13 +7,13 @@ score → alerta/relatório → auditoria, com a suite verde e as leituras de vo
 
 ```
 python -m pytest tests/ -q
-80 passed, 2 warnings in 25.24s
+83 passed, 2 warnings in 52.57s
 ```
 
 | Arquivo | Casos | Cobre |
 |---|---|---|
 | `tests/test_unit.py` | 23 | Funções puras de feature/score, **decomposição auditável da regra (`componentes_regra`)**, **mensagem do alerta com penalidades e segunda opinião**, score contínuo, fatores por contribuição, retry/retomada do simulador |
-| `tests/test_api.py` | 38 | Login, RBAC, POST/GET telemetria, 409 de coleta repetida, payloads sujos, token expirado/forjado, auditoria, **alerta do histórico seguindo a regra mesmo divergindo** |
+| `tests/test_api.py` | 41 | Login, RBAC, **RBAC do técnico (lê frota, não posta, não vê trilha)**, POST/GET telemetria, 409 de coleta repetida, payloads sujos, token expirado/forjado, auditoria, **alerta do histórico seguindo a regra mesmo divergindo** |
 | `tests/test_etl.py` | 16 | Idempotência da carga, higienização por motivo, rastreabilidade, migração de base legada |
 | `tests/test_e2e.py` | 3 | **Fluxo completo**: ETL em diretório temporário → API contra esse banco → score → alerta da regra no histórico → auditoria |
 | `tests/conftest.py` | — | Banco temporário por teste, `TestClient`, segredo de teste fixo |
@@ -115,11 +115,17 @@ GET /auditoria?limit=3       : 3 eventos (último: consultar_risco de Fernanda C
 GET /health                  : {'status': 'ok', 'service': 'agrorisk-api', 'version': '3.0.0'}
 ```
 
+**Nota de reprodutibilidade:** contadores e timestamps desta seção são de uma execução específica —
+ao reproduzir, os números absolutos diferem; o que se reproduz são os invariantes: +N registros
+exatos por coleta, toda entrada com score, duplicados 0, integridade ok e coerência
+regra↔histórico 0/0.
+
 ## 3. Evidências visuais
 
-Prints das três visões em [`assets/prints/`](../assets/prints) (capturados com o dashboard rodando
-contra a API): gestor (mapa + tendências), operador (score regra × modelo + fatores) e analista
-(alertas + trilha de auditoria). Detalhes em [`dashboard-relatorios.md`](dashboard-relatorios.md).
+Prints das quatro visões em [`assets/prints/`](../assets/prints) (capturados com o dashboard rodando
+contra a API): gestor (mapa + tendências), operador (score regra × modelo + fatores), analista
+(alertas + trilha de auditoria) e técnico de manutenção (`04-tecnico-manutencao.png` — ranking de
+desgaste e manutenção recomendada). Detalhes em [`dashboard-relatorios.md`](dashboard-relatorios.md).
 
 ## 4. Casos de uso das User Stories
 
@@ -128,6 +134,7 @@ contra a API): gestor (mapa + tendências), operador (score regra × modelo + fa
 | US-01 | Operador recebe alerta antes de entrar em área de risco | Alerta na tela do operador com nível, scores e **fatores que pesaram**, gerado no POST e persistido em `alertas` | `02-operador-campo.png`, bloco "Decisão registrada" acima |
 | US-04 | Gestora vê em mapa o status de risco de cada equipamento | Mapa com pontos por nível + KPIs + tendência por região e por tipo de operação | `01-gestor-frota.png` |
 | US-07 | Analista acessa histórico de alertas antes de um sinistro | Histórico auditável de alertas com exportação CSV + trilha de auditoria das decisões | `03-analista-seguradora.png` |
+| — | Técnico de Manutenção acompanha desgaste e manutenção preventiva (perfil citado no enunciado da Sprint 4) | Ranking de desgaste + "manutenção recomendada agora" com as penalidades da regra | `04-tecnico-manutencao.png` |
 
 ## 5. Como reproduzir
 

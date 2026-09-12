@@ -114,7 +114,7 @@ exatamente o que o operador precisa inspecionar antes de confiar.
 
 `tests/test_unit.py`: score contínuo ponderado, representante dentro da própria faixa, fatores
 por contribuição (incluindo o caso das duas linhas longe da água) e continuidade do score.
-Cobertura total: **80 testes passando**. `src/ml/train_model.py` reproduz o treino, a avaliação e a
+Cobertura total: **83 testes passando**. `src/ml/train_model.py` reproduz o treino, a avaliação e a
 reescreta do relatório de métricas.
 
 ### Propagação: alerta e dashboard
@@ -186,6 +186,73 @@ fatores locais, que justifica manter o modelo na pilha **como segunda opinião**
 alerta fica com a regra, auditável ponto a ponto. Em produção com dados da Sompo, o alvo deve ser
 desfecho observado (sinistro, near-miss, manutenção corretiva); o pipeline
 (`train_model.py` sobre a saída do ETL) já aceita esse troco de rótulo sem mudança estrutural.
+
+## O valor do modelo sobre a regra, medido
+
+Os experimentos abaixo (script [`src/ml/05_validacao_valor_ml.py`](../src/ml/05_validacao_valor_ml.py),
+seed 42, base: os 1.000 registros de `data/processed/features.csv` — o mesmo CSV do treino; os 997
+persistidos no banco vêm dele após o descarte de 3 duplicados na carga) medem o que o modelo agrega
+de fato sobre a regra que gerou o rótulo. A "regra" aqui é `score_regra`, a heurística
+determinística usada na inferência em tempo real (`ml.features`) — propositadamente distinta do
+gerador do rótulo de treino (`generate_dataset.calcular_score`, com ruído), como documentado no
+próprio módulo. Saída integral da execução:
+
+```
+[1] divergência por distância da fronteira
+    base: 1000 registros
+    dist <= 5 da fronteira: 214 registros, divergência regra x modelo: 88.8%
+    dist  > 5 da fronteira: 786 registros, divergência regra x modelo: 69.1%
+[2] robustez a ruído ±10%
+    base: 1000 registros, ruído multiplicativo uniforme(0.9, 1.1) por célula
+    regra  — troca de nível: 4.0% dos registros
+    modelo — troca de nível: 5.8% dos registros
+[3] granularidade dentro da banda
+    banda Alto: 270 registros | valores distintos da regra: 25 | valores distintos do score do modelo: 49
+    banda Crítico: 639 registros | valores distintos da regra: 25 | valores distintos do score do modelo: 71
+[4] sensibilidade dos pesos da regra
+    base: 1000 registros | % que muda de nível ao multiplicar o peso por 0.8 / 1.2
+    componente                        -20%      +20%
+    carga                             4.3%      3.7%
+    velocidade de operação            3.9%      3.3%
+    umidade do solo                   3.8%      3.2%
+    horas de uso                      3.6%      2.8%
+    declividade                       3.4%      2.6%
+    manutenção atrasada               2.7%      2.5%
+    histórico de incidentes           2.6%      2.6%
+    proximidade de água               2.3%      1.4%
+    tipo de solo                      1.5%      1.8%
+    precipitação                      1.7%      1.0%
+    visibilidade                      0.0%      0.0%
+```
+
+**[1] Divergência por fronteira.** A 5 pontos ou menos de uma fronteira de banda (25,5/50,5/75,5),
+regra e modelo divergem em 88,8% dos 214 registros; longe da fronteira, 69,1%. A divergência se
+concentra nas fronteiras de banda, onde a soma determinística é instável — o modelo funciona como
+detector de ambiguidade exatamente onde a regra merece desconfiança. Registro honesto: mesmo longe
+da fronteira a divergência segue alta (69,1%), porque `score_regra` e o gerador do rótulo são
+funções distintas por construção — o sinal de ambiguidade vale em toda a faixa, mas é nas
+fronteiras que ele mais denota instabilidade de limiar.
+
+**[2] Robustez a ruído.** Com ±10% multiplicativos em cada célula numérica (categóricas intactas),
+o nível da regra troca em 4,0% dos registros e o do modelo em 5,8%. O modelo troca de nível mais
+que a regra sob ruído: o valor medido dele está no detector de ambiguidade e no score contínuo,
+não na estabilidade — registrado como está.
+
+**[3] Granularidade.** Na banda Alto a regra assume 25 valores e o modelo 49; na Crítico, 25 e 71 —
+o score contínuo ordena dentro da banda onde a regra empata.
+
+**[4] Sensibilidade dos pesos.** Pesos cujo ±20% muda o nível de ~4% dos registros (carga,
+velocidade de operação, umidade do solo) são decisivos para calibrar com a Sompo primeiro; os que
+mudam ~0% (visibilidade) são irrelevantes para o resultado — o termo existe na regra, mas não
+moveria a classificação de ninguém nem com ±20% de peso.
+
+### O que falta para a validação com a Sompo
+
+- Revisar os 11 pesos da regra com especialista de risco agrícola (a tabela de sensibilidade
+  acima mostra por onde começar);
+- Trocar o rótulo por desfecho observado (sinistro, near-miss, manutenção corretiva) e retreinar
+  (`train_model.py` já aceita o troco);
+- Rodar contra telemetria real da frota antes de qualquer decisão de underwriting.
 
 ## Limitações declaradas
 

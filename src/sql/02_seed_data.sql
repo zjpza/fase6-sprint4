@@ -14,7 +14,8 @@ VALUES
 INSERT OR IGNORE INTO usuarios (nome, email, senha_hash, role, id_equipamento_acesso) VALUES
     ('Carlos Silva', 'carlos@agrorisk.local', '$2b$12$9tKATY.UHIATYfbllvEP6eK9rHJT04yyumO8jbl0tZw8oFV/uD6Yq', 'Operador', 'EQ-MT-0023'),
     ('Fernanda Costa', 'fernanda@agrorisk.local', '$2b$12$.iUcFsUUfEVgmyfRexJXfeekGvdxgoScWSECbvwz4SmepY9aa4Us.', 'GestorFrota', NULL),
-    ('Ricardo Mendes', 'ricardo@sompo.local', '$2b$12$UVnBHAXEYjxU4JaNcmVWFOBy/j7KRIwRsgOQIcw.4Z0xhFkSJlc7K', 'AnalistaSeguradora', NULL);
+    ('Ricardo Mendes', 'ricardo@sompo.local', '$2b$12$UVnBHAXEYjxU4JaNcmVWFOBy/j7KRIwRsgOQIcw.4Z0xhFkSJlc7K', 'AnalistaSeguradora', NULL),
+    ('Marcos Vieira', 'marcos@agrorisk.local', '$2b$12$HYC7nDDtEEGNXlOm12zxAOKHThFOfCAqM8c/RvLcXGc2lL3nFZXza', 'TecnicoManutencao', NULL);
 
 -- Regras de negócio usadas para explicar a composição do score de risco.
 CREATE TABLE IF NOT EXISTS regras_risco (

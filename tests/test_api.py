@@ -29,6 +29,7 @@ TELEMETRIA_PAYLOAD = {
 OPERADOR = ("carlos@agrorisk.local", "operador123")
 GESTOR = ("fernanda@agrorisk.local", "gestor123")
 ANALISTA = ("ricardo@sompo.local", "analista123")
+TECNICO = ("marcos@agrorisk.local", "tecnico123")
 
 
 def _login(client, email: str, senha: str) -> str:
@@ -515,4 +516,50 @@ def test_operador_nao_acessa_a_trilha_de_auditoria(client):
 
     resp = client.get("/api/v1/auditoria", headers=_auth(token))
 
+    assert resp.status_code == 403
+
+
+def test_tecnico_le_a_frota_inteira(client):
+    """Técnico lê a frota inteira (não é filtrado como operador) em telemetria, equipamentos e alertas."""
+    token_tecnico = _login(client, *TECNICO)
+    resp = client.get("/api/v1/me", headers=_auth(token_tecnico))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["role"] == "TecnicoManutencao"
+
+    # Duas coletas de equipamentos distintos (operador e gestor) para provar que o técnico vê a frota toda.
+    token_operador = _login(client, *OPERADOR)
+    resp = _post_telemetria(client, token_operador, {**TELEMETRIA_PAYLOAD, "id_coleta": 910100})
+    assert resp.status_code == 201, resp.text
+    token_gestor = _login(client, *GESTOR)
+    resp = _post_telemetria(
+        client,
+        token_gestor,
+        {**TELEMETRIA_PAYLOAD, "id_equipamento": "EQ-GO-0012", "id_coleta": 910101},
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = client.get("/api/v1/telemetria?limit=1000", headers=_auth(token_tecnico))
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()
+    assert len({r["id_equipamento"] for r in rows}) >= 2
+
+    resp = client.get("/api/v1/equipamentos", headers=_auth(token_tecnico))
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()) >= 5
+
+    resp = client.get("/api/v1/alertas", headers=_auth(token_tecnico))
+    assert resp.status_code == 200, resp.text
+
+
+def test_tecnico_nao_envia_telemetria(client):
+    """Técnico não posta telemetria (RBAC) — a coleta é responsabilidade do operador."""
+    token = _login(client, *TECNICO)
+    resp = _post_telemetria(client, token, TELEMETRIA_PAYLOAD)
+    assert resp.status_code == 403
+
+
+def test_tecnico_nao_acessa_a_trilha_de_auditoria(client):
+    """Técnico não consulta a trilha (RBAC) — auditoria é de gestor e analista."""
+    token = _login(client, *TECNICO)
+    resp = client.get("/api/v1/auditoria", headers=_auth(token))
     assert resp.status_code == 403

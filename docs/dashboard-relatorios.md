@@ -1,6 +1,6 @@
 # Relatórios e prints do dashboard — Sprint 4 (issue #7)
 
-O que cada perfil vê, com que critério o sistema alerta e as capturas das três visões
+O que cada perfil vê, com que critério o sistema alerta e as capturas das quatro visões
 (a lacuna apontada no feedback da Sprint 3 era a ausência de prints no repositório).
 
 ## Prints das visões finais (`assets/prints/`)
@@ -10,6 +10,7 @@ O que cada perfil vê, com que critério o sistema alerta e as capturas das trê
 | [`01-gestor-frota.png`](../assets/prints/01-gestor-frota.png) | Fernanda (Gestor de Frota) | KPIs da frota, mapa de risco por região, distribuição por nível, evolução do risco médio, **tendência por região**, **score médio por tipo de operação**, critérios de risco e tabela com risco (regra) × risco (ML) |
 | [`02-operador-campo.png`](../assets/prints/02-operador-campo.png) | Carlos (Operador) | Status do equipamento, **score da regra × score do modelo (com delta)**, **fatores que pesaram na predição**, **alerta com as penalidades da regra (N pts) e a segunda opinião do modelo em caso divergente**, condições atuais e histórico de score |
 | [`03-analista-seguradora.png`](../assets/prints/03-analista-seguradora.png) | Ricardo (Analista) | Histórico auditável de alertas + **trilha de auditoria** (quem acessou, o que o sistema decidiu) com exportação CSV |
+| [`04-tecnico-manutencao.png`](../assets/prints/04-tecnico-manutencao.png) | Marcos (Técnico de Manutenção) | Ranking de desgaste, **manutenção recomendada agora**, penalidades de manutenção da regra e critério de alerta |
 
 Como as capturas foram feitas: dashboard rodando de verdade contra a API, com
 `DASHBOARD_DEMO_LOGIN=<perfil>` (entra com o usuário de demonstração e permite capturar a tela
@@ -43,6 +44,7 @@ O mesmo critério aparece na tela (`Critério de classificação`) e vale para r
 | Operador (Carlos) | US-01 — alerta antes de entrar em área de risco | Status do próprio equipamento, alerta com causas, recomendação direta e histórico recente |
 | Gestor de Frota (Fernanda) | US-04 — mapa com status por equipamento | Mapa de risco, KPIs da frota, distribuição por nível, evolução, tendência por região e por tipo de operação |
 | Analista da Seguradora (Ricardo) | US-07 — histórico de alertas antes de um sinistro | Histórico exportável de alertas + trilha de auditoria das decisões, com exportação CSV |
+| Técnico de Manutenção (Marcos) | Perfil do enunciado da Sprint 4 — manutenção preventiva | Ranking de desgaste, manutenção recomendada e penalidades auditáveis |
 
 ## O que mudou nesta issue
 
@@ -60,6 +62,8 @@ O mesmo critério aparece na tela (`Critério de classificação`) e vale para r
      tabela do analista estourava com `KeyError`; campo adicionado ao schema e coberto por teste.
    - O sidebar renderizava **dois campos de Email** (um fora do formulário, sem placeholder),
      resquício de edição anterior; removido.
+6. **Quarta visão (Técnico de Manutenção)**: perfil citado no enunciado e ausente nas 3 visões
+   originais; lê a frota inteira, não posta telemetria e não acessa a trilha (RBAC testado).
 
 ## Limitações declaradas
 

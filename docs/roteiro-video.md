@@ -32,13 +32,14 @@ DASHBOARD_DEMO_LOGIN=gestor python -m streamlit run src/dashboard/app.py
 | 5 | 2:00-2:40 | Dashboard como **Operador** (Carlos) | "Visão do operador: score da regra 58 e score do modelo 33 — mesma escala, então dá para ver quando discordam. O alerta cita as penalidades da regra com os pontos de cada uma e a segunda opinião do modelo; a regra decide, o modelo sinaliza ambiguidade." |
 | 6 | 2:40-3:30 | Dashboard como **Gestor** (Fernanda) | "Visão da gestora: mapa de risco da frota, distribuição por nível, evolução, tendência por região e score por tipo de operação, além do critério de classificação explícito na tela." |
 | 7 | 3:30-4:10 | Dashboard como **Analista** (Ricardo) + exportação CSV | "Visão da analista: histórico de alertas com exportação e a trilha de auditoria — quem acessou, quando, e o que o sistema decidiu, com scores, alerta e fatores de cada registro." |
-| 8 | 4:10-4:40 | Terminal: `python -m pytest tests/ -q` | "80 testes passando, incluindo um fluxo completo ETL → API → score → alerta da regra → auditoria." |
-| 9 | 4:40-5:00 | Volta ao README (decisões técnicas e prints) | "As decisões de cada correção estão registradas em docs/, com as evidências das issues #1 a #9." |
+| 8 | 4:10-4:30 | Dashboard como **Técnico** (Marcos) | "Visão do técnico de manutenção: ranking de desgaste e a lista de manutenção recomendada agora — as penalidades da regra que vêm de horas de uso, atraso e incidentes." |
+| 9 | 4:30-4:50 | Terminal: pytest | "83 testes passando, incluindo um fluxo completo ETL → API → score → alerta da regra → auditoria." |
+| 10 | 4:50-5:00 | Volta ao README (decisões técnicas e prints) | "As decisões de cada correção estão registradas em docs/, com as evidências das issues #1 a #9." |
 
 ## Checklist antes de publicar
 
 - [ ] Duração ≤ 5 min
-- [ ] **Fluxo mostrado na tela** (não só narrado): coleta → resposta da API com score/fatores → alerta → as 3 visões
+- [ ] **Fluxo mostrado na tela** (não só narrado): coleta → resposta da API com score/fatores → alerta → as 4 visões (incluindo técnico de manutenção)
 - [ ] Narração humana (sem TTS)
 - [ ] Publicar no YouTube como **não listado**
 - [ ] Colar o link no README (`## 🎥 Apresentação em Vídeo`) e na issue #9
