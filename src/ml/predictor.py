@@ -1,3 +1,11 @@
+"""Inferência de risco: score contínuo e fatores por contribuição real (issue #4).
+
+O score deixa de ser um valor fixo por classe (Sprint 3) e passa a vir das
+probabilidades do modelo, na mesma escala 0-100 da regra. Os fatores principais
+saem de perturbação local: quanto a probabilidade do nível predito muda quando
+aquela variável é perturbada naquele registro — sensibilidade local, não valor
+absoluto bruto da variável.
+"""
 from __future__ import annotations
 
 import json
@@ -6,11 +14,20 @@ from pathlib import Path
 
 import pandas as pd
 
+from ml.features import score_continuo
+
 ROOT = Path(__file__).resolve().parents[2]
 MODEL_PATH = ROOT / "src" / "ml" / "models" / "risk_model.pkl"
 
-# Pontos médios das faixas de risco (score 0-100)
-SCORE_POR_NIVEL = {"Baixo": 12, "Médio": 38, "Alto": 63, "Crítico": 88}
+# Mudança mínima na probabilidade (em pontos percentuais) para a variável contar como fator.
+LIMITE_CONTRIBUICAO = 0.01
+
+# Variáveis discretas: o passo de perturbação é uma unidade (limitada ao domínio).
+FEATURES_DISCRETAS = {
+    "historico_incidentes": (0, None),
+    "tipo_solo_encoded": (0, 2),
+    "faixa_proximidade_encoded": (0, 3),
+}
 
 
 class RiskPredictor:
@@ -37,23 +54,55 @@ class RiskPredictor:
     def model_name(self) -> str:
         return str(self._artefato.get("model_name", "desconhecido"))
 
-    def _extrair_top_features(self, row: pd.Series) -> list[str]:
-        """Retorna as 3 features com maior contribuição absoluta para o score calculado."""
-        features_numericas = [
-            "umidade_solo_pct",
-            "proximidade_agua_m",
-            "precipitacao_mm",
-            "declividade_graus",
-            "velocidade_operacao_kmh",
-            "carga_pct",
-            "horas_uso_equipamento",
-            "dias_ultima_manutencao",
-            "historico_incidentes",
-            "velocidade_vento_kmh",
-            "temperatura_c",
-        ]
-        valores = {col: abs(float(row.get(col, 0))) for col in features_numericas if col in row}
-        return [col for col, _ in sorted(valores.items(), key=lambda x: x[1], reverse=True)[:3]]
+    def _valores_perturbados(self, coluna: str, valor: float) -> list[float]:
+        """Valores alternativos de uma variável para medir seu efeito local.
+
+        Contínuas variam ±20%; discretas (contagens e categorias codificadas)
+        variam uma unidade dentro do domínio — passos que o operador reconhece.
+        """
+        if coluna in FEATURES_DISCRETAS:
+            minimo, maximo = FEATURES_DISCRETAS[coluna]
+            candidatos = [valor - 1, valor + 1]
+            return [
+                candidato
+                for candidato in candidatos
+                if candidato >= minimo and (maximo is None or candidato <= maximo)
+            ]
+        return [valor * 0.8, valor * 1.2]
+
+    def _fatores_por_contribuicao(self, row: pd.Series, base: dict[str, float], nivel: str) -> list[str]:
+        """Top-3 variáveis que mais movem a probabilidade do nível predito neste registro.
+
+        Sensibilidade local (uma variável por vez, dentro do próprio registro):
+        a variável entra como fator porque mexer nela muda a predição, e não
+        porque o valor dela é numericamente grande.
+        """
+        variantes: list[pd.Series] = []
+        origens: list[str] = []
+        for coluna in self._features:
+            if coluna not in row.index:
+                continue
+            for candidato in self._valores_perturbados(coluna, float(row[coluna])):
+                variante = row.copy()
+                variante[coluna] = candidato
+                variantes.append(variante)
+                origens.append(coluna)
+
+        if not variantes or nivel not in base:
+            return []
+
+        classes = list(self._label_encoder.classes_)
+        probabilidades = self._model.predict_proba(pd.DataFrame(variantes)[self._features])
+        prob_base = base[nivel]
+        indice_nivel = classes.index(nivel)
+
+        contribuicoes: dict[str, float] = {}
+        for coluna, linha in zip(origens, probabilidades):
+            efeito = abs(float(linha[indice_nivel]) - prob_base)
+            contribuicoes[coluna] = max(contribuicoes.get(coluna, 0.0), efeito)
+
+        relevantes = [par for par in contribuicoes.items() if par[1] >= LIMITE_CONTRIBUICAO]
+        return [coluna for coluna, _ in sorted(relevantes, key=lambda par: par[1], reverse=True)[:3]]
 
     def predict(self, df: pd.DataFrame) -> pd.DataFrame:
         """Recebe um DataFrame de telemetria e retorna predições por registro."""
@@ -76,34 +125,31 @@ class RiskPredictor:
         )
 
         resultados = []
-        for i, row in df.iterrows():
-            nivel = labels[i]
-            score = SCORE_POR_NIVEL.get(nivel, 50)
-            alerta = nivel in ("Alto", "Crítico")
-            proba_json = (
-                json.dumps(
-                    {
-                        c: round(float(p), 4)
-                        for c, p in zip(self._label_encoder.classes_, proba_list[i])
-                    }
-                )
+        for posicao, (_, row) in enumerate(df.iterrows()):
+            nivel = labels[posicao]
+            probabilidades = (
+                {
+                    str(c): round(float(p), 4)
+                    for c, p in zip(self._label_encoder.classes_, proba_list[posicao])
+                }
                 if proba_list is not None
-                else "{}"
+                else {}
             )
-            fatores = self._extrair_top_features(row)
+            score = round(score_continuo(probabilidades)) if probabilidades else 50
+            alerta = nivel in ("Alto", "Crítico")
+            fatores = self._fatores_por_contribuicao(row, probabilidades, str(nivel))
             resultados.append(
                 {
-                    "id_registro": int(row.get("id_registro", i)),
+                    "id_registro": int(row.get("id_registro", posicao)),
                     "id_equipamento": str(row.get("id_equipamento", "")),
-                    "score_risco_predito": score,
+                    "score_risco_predito": int(min(100, max(0, score))),
                     "nivel_risco_predito": nivel,
                     "alerta_predito": int(alerta),
                     "modelo_utilizado": self.model_name,
-                    "probabilidades": proba_json,
+                    "probabilidades": json.dumps(probabilidades),
                     "fatores_principais": json.dumps(fatores),
                 }
             )
-
         return pd.DataFrame(resultados)
 
     def recomendacao(self, nivel: str, fatores: list[str]) -> str:

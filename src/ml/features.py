@@ -17,6 +17,20 @@ SOLO_ENCODER = {"Arenoso": 0, "Misto": 1, "Argiloso": 2}
 OPERACAO_ENCODER = {"Transporte": 0, "Campo": 1}
 FAIXA_ENCODER = {"Baixo": 0, "Médio": 1, "Alto": 2, "Crítico": 3}
 
+# Bandas oficiais do score 0-100. Fonte única do nível de risco: `classificar_risco`
+# e o score contínuo (que usa o ponto médio de cada banda) saem daqui.
+FAIXAS_NIVEL = {
+    "Baixo": (0, 25),
+    "Médio": (26, 50),
+    "Alto": (51, 75),
+    "Crítico": (76, 100),
+}
+
+# Ponto médio de cada banda — o "valor" de um nível dentro do score contínuo.
+REPRESENTANTE_NIVEL = {
+    nivel: (minimo + maximo) / 2 for nivel, (minimo, maximo) in FAIXAS_NIVEL.items()
+}
+
 
 def faixa_proximidade(valor: int) -> str:
     if valor < 50:
@@ -29,13 +43,27 @@ def faixa_proximidade(valor: int) -> str:
 
 
 def classificar_risco(score: int) -> str:
-    if score <= 25:
-        return "Baixo"
-    if score <= 50:
-        return "Médio"
-    if score <= 75:
-        return "Alto"
+    score = min(100, max(0, score))
+    for nivel, (minimo, maximo) in FAIXAS_NIVEL.items():
+        if minimo <= score <= maximo:
+            return nivel
     return "Crítico"
+
+
+def score_continuo(probabilidades: dict[str, float]) -> float:
+    """Score 0-100 contínuo: esperança do nível, ponderada pelas probabilidades do modelo.
+
+    Substitui o valor fixo por classe (Baixo=12, Médio=38, Alto=63, Crítico=88 da
+    Sprint 3): dois registros classificados como "Alto" com confianças diferentes
+    deixam de receber o mesmo score. O representante de cada faixa é o ponto médio
+    da banda de `classificar_risco`, então o score devolvido continua caindo na
+    faixa do nível predito quando esse nível domina as probabilidades.
+    """
+    return sum(
+        probabilidade * REPRESENTANTE_NIVEL[nivel]
+        for nivel, probabilidade in probabilidades.items()
+        if nivel in REPRESENTANTE_NIVEL
+    )
 
 
 def calcular_features(dados: dict) -> dict:
