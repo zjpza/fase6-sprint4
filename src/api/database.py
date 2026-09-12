@@ -1,3 +1,4 @@
+"""Acesso ao banco SQLite (sompo.db) da API AgroRisk AI."""
 from __future__ import annotations
 
 import sqlite3
@@ -8,6 +9,7 @@ DB_PATH = ROOT / "sompo.db"
 
 
 def get_connection() -> sqlite3.Connection:
+    """Abre uma conexão com rows nomeadas (sqlite3.Row) e FKs habilitadas."""
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -15,6 +17,7 @@ def get_connection() -> sqlite3.Connection:
 
 
 def get_db() -> sqlite3.Connection:
+    """Dependency do FastAPI: abre a conexão por request e garante o fechamento."""
     conn = get_connection()
     try:
         yield conn

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Annotated
-
 import sqlite3
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from api.database import get_db
 from api.schemas import (
@@ -26,6 +26,7 @@ router = APIRouter(prefix="/api/v1")
 
 
 def _get_client_ip(request: Request) -> str | None:
+    """IP de origem da chamada (respeita X-Forwarded-For), para a trilha de auditoria."""
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
         return forwarded.split(",")[0].strip()
@@ -38,6 +39,7 @@ def login(
     request: Request,
     db: Annotated[sqlite3.Connection, Depends(get_db)],
 ):
+    """Autentica email+senha e emite o JWT de acesso (60 min)."""
     user = authenticate(db, payload.email, payload.senha)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciais inválidas")
@@ -63,6 +65,7 @@ def listar_equipamentos(
     request: Request,
     user: dict = Depends(get_current_user),
 ):
+    """Lista a frota completa de equipamentos cadastrados."""
     log(
         db,
         id_usuario=user["id_usuario"],
@@ -99,6 +102,10 @@ def risco_equipamento(
     request: Request,
     user: dict = Depends(get_current_user),
 ):
+    """Risco consolidado de um equipamento (view vw_resumo_risco_equipamento).
+
+    Operadores só consultam o próprio equipamento; os demais papéis veem qualquer um.
+    """
     if user["role"] == "Operador" and user.get("id_equipamento_acesso") != id_equipamento:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso negado a este equipamento")
 
@@ -134,6 +141,7 @@ def listar_alertas(
     request: Request,
     user: dict = Depends(get_current_user),
 ):
+    """Alertas de risco: operador vê só os do próprio equipamento; gestor/analista veem os últimos 100."""
     if user["role"] == "Operador":
         id_equipamento = user.get("id_equipamento_acesso")
         cursor = db.execute(
@@ -157,7 +165,7 @@ def listar_telemetria(
     request: Request,
     user: dict = Depends(get_current_user),
     id_equipamento: str | None = None,
-    limit: int = 1000,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Registros por página (1-1000)")] = 1000,
 ):
     """Retorna histórico de telemetria com dados de equipamento e predição do modelo.
 
@@ -209,8 +217,35 @@ def receber_telemetria(
     request: Request,
     user: dict = Depends(require_operador_or_gestor),
 ):
+    """Recebe telemetria autenticada, processa score+predição e registra alerta.
+
+    Valida em ordem: RBAC (operador só posta do próprio equipamento), existência
+    do equipamento no cadastro (422 com rastro de auditoria) e, por fim, o
+    processamento — erros internos viram 500 genérico sem vazar detalhes.
+    """
     if user["role"] == "Operador" and user.get("id_equipamento_acesso") != payload.id_equipamento:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Operador não autorizado para este equipamento")
+
+    existe = db.execute(
+        "SELECT 1 FROM equipamentos WHERE id_equipamento = ?",
+        (payload.id_equipamento,),
+    ).fetchone()
+    if existe is None:
+        # Entrada fora do padrão: responde 422 claro (antes era 500 de FK) e
+        # deixa rastro auditável. Id em `detalhes` porque auditoria.id_equipamento
+        # tem FK para equipamentos.
+        log(
+            db,
+            id_usuario=user["id_usuario"],
+            acao="telemetria_rejeitada",
+            recurso="/api/v1/telemetria",
+            detalhes=f"equipamento={payload.id_equipamento} não cadastrado",
+            ip_origem=_get_client_ip(request),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Equipamento {payload.id_equipamento} não cadastrado",
+        )
     predictor = request.app.state.predictor
     try:
         resultado = processar_telemetria(db, payload.model_dump(), predictor)
