@@ -166,10 +166,12 @@ fase6-sprint4/
 │   ├── etl-consistencia.md           # Evidências de consistência do ETL (issue #3)
 │   ├── ml-score-e-fatores.md         # Score contínuo e fatores do modelo (issue #4)
 │   ├── integracao-coleta.md          # Confiabilidade da coleta de telemetria (issue #5)
-│   └── seguranca-auditoria.md        # Segredo, tokens e trilha de auditoria (issue #6)
-└── assets/                            # Diagrama de arquitetura (Mermaid + PNG)
+│   ├── seguranca-auditoria.md        # Segredo, tokens e trilha de auditoria (issue #6)
+│   └── dashboard-relatorios.md       # Critérios, personas e prints das visões (issue #7)
+└── assets/                            # Diagrama de arquitetura e prints das telas
     ├── diagrama_arquitetura.mmd      # Fonte Mermaid editável
-    └── diagrama_arquitetura.png      # Imagem renderizada
+    ├── diagrama_arquitetura.png      # Imagem renderizada
+    └── prints/                       # Capturas das 3 visões do dashboard (issue #7)
 ```
 
 ---
@@ -382,6 +384,21 @@ Os testes usam `TestClient` (FastAPI) em processo — não exigem API rodando. O
 | US-01 | Operador | Receber alerta visual antes de entrar em área de alto risco. |
 | US-04 | Gestora | Visualizar em mapa o status de risco de cada equipamento. |
 | US-07 | Analista | Acessar histórico de alertas emitidos antes de um sinistro. |
+
+---
+
+## 🖼️ Prints das Visões
+
+Capturas das telas finais (dashboard rodando contra a API), com o score contínuo e os fatores
+da predição — detalhes e critérios em [`docs/dashboard-relatorios.md`](docs/dashboard-relatorios.md).
+
+| Gestor de Frota | Operador | Analista da Seguradora |
+|---|---|---|
+| ![Visão do gestor](assets/prints/01-gestor-frota.png) | ![Visão do operador](assets/prints/02-operador-campo.png) | ![Visão do analista](assets/prints/03-analista-seguradora.png) |
+
+Para capturar/gravar a demonstração entrando direto com um usuário de demonstração, suba o
+dashboard com `DASHBOARD_DEMO_LOGIN=gestor` (ou `operador`/`analista`) — sem a variável, o login
+continua sendo o formulário normal.
 
 ---
 
