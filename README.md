@@ -159,15 +159,17 @@ fase6-sprint4/
 ├── tests/                             # Suite pytest (fixtures, testes unitários, API e ETL)
 │   ├── conftest.py                   # Fixtures: banco SQLite temporário + TestClient
 │   ├── test_unit.py                  # Funções puras (faixa, score, features)
-│   ├── test_api.py                   # Endpoints: login, RBAC, telemetria
-│   └── test_etl.py                   # ETL: idempotência, higienização e rastreabilidade
+│   ├── test_api.py                   # Endpoints: login, RBAC, telemetria, auditoria
+│   ├── test_etl.py                   # ETL: idempotência, higienização e rastreabilidade
+│   └── test_e2e.py                    # Fluxo completo: ETL → API → score → alerta → auditoria
 ├── docs/                              # Documentação técnica
 │   ├── auditoria-sprint4.md          # Diagnóstico da base importada (issue #1)
 │   ├── etl-consistencia.md           # Evidências de consistência do ETL (issue #3)
 │   ├── ml-score-e-fatores.md         # Score contínuo e fatores do modelo (issue #4)
 │   ├── integracao-coleta.md          # Confiabilidade da coleta de telemetria (issue #5)
 │   ├── seguranca-auditoria.md        # Segredo, tokens e trilha de auditoria (issue #6)
-│   └── dashboard-relatorios.md       # Critérios, personas e prints das visões (issue #7)
+│   ├── dashboard-relatorios.md       # Critérios, personas e prints das visões (issue #7)
+│   └── evidencias-mvp.md             # Suite, execução demonstrativa e User Stories (issue #8)
 └── assets/                            # Diagrama de arquitetura e prints das telas
     ├── diagrama_arquitetura.mmd      # Fonte Mermaid editável
     ├── diagrama_arquitetura.png      # Imagem renderizada
@@ -348,7 +350,7 @@ O dashboard consome a API REST autenticada via JWT — não lê o banco diretame
 
 ### Testes automatizados
 
-A suite pytest cobre funções puras (features e score), endpoints da API com RBAC e o ETL:
+A suite pytest (76 casos) cobre funções puras, endpoints com RBAC, ETL e o fluxo completo — resumo em [`docs/evidencias-mvp.md`](docs/evidencias-mvp.md):
 
 ```bash
 # Com o venv ativado
@@ -361,6 +363,7 @@ python -m pytest tests/ -v
 | `tests/test_unit.py` | `faixa_proximidade`, `classificar_risco`, `score_regra`, `score_continuo` (ponderado pelas probabilidades), `_calcular_features`, inferência do modelo (fatores por contribuição e continuidade do score) |
 | `tests/test_api.py` | Login (200/401), `/me`, POST `/telemetria` (201/401/403/409/422), RBAC por papel, coleta reenviada sem duplicar, rajada com consistência de totais, payload malformado sem gravação parcial, token expirado/forjado, injeção no identificador, GET `/telemetria` com filtragem e validação de `limit`, `/auditoria` com RBAC e filtro por ação, `/equipamentos`, `/alertas`, `/health` |
 | `tests/test_etl.py` | Carga idempotente (recarga não duplica nem insere 0), higienização por motivo (faltante, duplicado, domínio, faixa, incoerência), rastreabilidade `fonte`/`id_coleta`, migração de base legada |
+| `tests/test_e2e.py` | Fluxo completo em diretório temporário: ETL → API contra o banco gerado → score → alerta → auditoria, e recarga do ETL sem duplicar |
 
 Os testes usam `TestClient` (FastAPI) em processo — não exigem API rodando. O banco é recriado em arquivo temporário a cada teste, garantindo isolamento.
 
