@@ -1,4 +1,4 @@
-# 🚜 AgroRisk AI — FIAP + Sompo Seguros | Fase 5 / Sprint 3
+# 🚜 AgroRisk AI — FIAP + Sompo Seguros | Fase 6 / Sprint 4
 
 > **MVP funcional integrado para predição de risco operacional em frotas agrícolas.**
 
@@ -23,13 +23,15 @@ A divisão de tarefas entre os integrantes foi organizada pelas issues do reposi
 
 | Issue | Módulo | Responsáveis |
 |-------|--------|--------------|
-| [#7](https://github.com/zjpza/fase-5-sprint-3/issues/7) | Setup — importação da base da Sprint 2 | Patrick Borges · Kayck Gabriel |
-| [#3](https://github.com/zjpza/fase-5-sprint-3/issues/3) | ETL / Banco SQLite + pipelines | Luis Henrique · Kayck Gabriel |
-| [#6](https://github.com/zjpza/fase-5-sprint-3/issues/6) | ML — integração do modelo Random Forest | João Pedro · Henrique Sanches |
-| [#2](https://github.com/zjpza/fase-5-sprint-3/issues/2) | Backend — API integradora FastAPI | João Pedro · Henrique Sanches |
-| [#5](https://github.com/zjpza/fase-5-sprint-3/issues/5) | Segurança — JWT, RBAC e auditoria | João Pedro · Henrique Sanches |
-| — | Dashboard Streamlit (3 visões por persona) | João Pedro · Henrique Sanches |
-| [#8](https://github.com/zjpza/fase-5-sprint-3/issues/8) | Entrega final — screenshots, doc de fluxo, vídeo e acesso do tutor | Kayck Gabriel · Luis Henrique |
+| [#1](https://github.com/zjpza/fase6-sprint4/issues/1) | Setup — auditoria da base importada e plano de consolidação | Patrick Borges · Kayck Gabriel |
+| [#2](https://github.com/zjpza/fase6-sprint4/issues/2) | Arquitetura — modularização e tratamento de exceções | João Pedro · Henrique Sanches |
+| [#3](https://github.com/zjpza/fase6-sprint4/issues/3) | ETL / Banco SQLite — inconsistências, faltantes e duplicidades | Luis Henrique · Kayck Gabriel |
+| [#4](https://github.com/zjpza/fase6-sprint4/issues/4) | ML — variáveis, métricas e score de risco contínuo | João Pedro · Henrique Sanches |
+| [#5](https://github.com/zjpza/fase6-sprint4/issues/5) | Integração — validação da coleta de telemetria | Luis Henrique · Kayck Gabriel |
+| [#6](https://github.com/zjpza/fase6-sprint4/issues/6) | Segurança — controle de acesso, proteção de dados e rastreabilidade | João Pedro · Henrique Sanches |
+| [#7](https://github.com/zjpza/fase6-sprint4/issues/7) | Dashboard — relatórios por perfil (tendências, alertas, recomendações) | João Pedro · Henrique Sanches |
+| [#8](https://github.com/zjpza/fase6-sprint4/issues/8) | MVP — testes e evidências de validação ponta a ponta | Kayck Gabriel · Luis Henrique |
+| [#9](https://github.com/zjpza/fase6-sprint4/issues/9) | Entrega final — README, diagrama, vídeo e acesso do tutor | Kayck Gabriel · Luis Henrique |
 
 > O trio de integração central (ML + Backend + Segurança + Dashboard) foi conduzido por João Pedro e Henrique Sanches; a engenharia de dados e a entrega final contaram com Luis Henrique, Kayck Gabriel e Patrick Borges.
 
@@ -39,20 +41,20 @@ A divisão de tarefas entre os integrantes foi organizada pelas issues do reposi
 
 O **AgroRisk AI** é um sistema de análise preditiva de risco para equipamentos agrícolas que cruza dados ambientais, operacionais e históricos para gerar alertas preventivos antes que incidentes ocorram.
 
-Nesta **Sprint 3 (Fase 5)**, o objetivo é **integrar os módulos desenvolvidos nas Sprints anteriores em um protótipo funcional de ponta a ponta**. Os dados de telemetria entram no sistema, são persistidos em banco, processados pelo modelo de Machine Learning treinado na Sprint 2 e apresentados em uma interface simples para Operadores, Gestores de Frota e Analistas da Seguradora.
+Nesta **Sprint 4 (Fase 6)**, o objetivo é **consolidar o MVP integrado na Sprint 3 e corrigir as lacunas técnicas apontadas no feedback da tutoria**. As 9 issues do repositório fecham o ciclo: auditoria da base importada, refatoração arquitetural, refinamento do ETL/banco, ajuste do modelo preditivo, validação da integração, consolidação da segurança, relatórios finais do dashboard, testes de ponta a ponta e entrega. O fluxo permanece o da Sprint 3 — telemetria entra, é persistida, pontuada pelo modelo e apresentada por persona — agora com score de risco contínuo, dados íntegros e evidências de validação.
 
-> **Estado atual:** MVP funcional integrado com ~60% da solução em funcionamento. Backend FastAPI com APIs REST, autenticação JWT + bcrypt, RBAC centralizado, auditoria, pipeline ETL determinístico, modelo Random Forest integrado, simulador de telemetria em fluxo contínuo e dashboard Streamlit com visões por persona.
+> **Estado atual:** MVP integrado em consolidação para a entrega final. Backend FastAPI com APIs REST, autenticação JWT + bcrypt, RBAC centralizado, auditoria com IP, pipeline ETL determinístico, modelo Random Forest integrado, simulador de telemetria em fluxo contínuo e dashboard Streamlit com visões por persona. As correções da Sprint 4 estão rastreadas nas issues [#1–#9](https://github.com/zjpza/fase6-sprint4/issues).
 
 ---
 
-## 🎯 Objetivos da Sprint 3
+## 🎯 Objetivos da Sprint 4
 
-1. **Backend integrador** em Python que orquestra o fluxo completo: entrada → banco → modelo → saída.
-2. **Engenharia de dados** consolidada, com banco relacional e pipelines de ETL rastreáveis.
-3. **Integração com fontes** de telemetria, ambiente e operação (simuladas ou reais).
-4. **Segurança da informação**: controle de acesso, proteção das APIs/serviços e integridade dos dados.
-5. **Interface simples** (dashboard em Python) exibindo scores e alertas de forma clara.
-6. **Documentação** com arquitetura integrada, fluxo de dados e justificativas técnicas.
+1. **Backend integrador** consolidado e modularizado, com tratamento explícito de entradas ausentes, inválidas e fora do padrão.
+2. **Engenharia de dados** íntegra: pipelines rastreáveis, sem inconsistências, faltantes ou duplicidades na base.
+3. **Integração validada** com as fontes de telemetria, com confiabilidade da coleta comprovada.
+4. **Segurança da informação** consolidada: controle de acesso, proteção de dados e rastreabilidade das operações.
+5. **Interface e relatórios** finais por perfil, com tendências de risco, alertas e recomendações.
+6. **Documentação e evidências**: arquitetura efetivamente entregue, prints das visões, fluxo ponta a ponta demonstrado em vídeo.
 
 ---
 
@@ -62,11 +64,13 @@ Nesta **Sprint 3 (Fase 5)**, o objetivo é **integrar os módulos desenvolvidos 
 |--------|------|-------------------|
 | Sprint 1 | Fase 2 | Planejamento: personas, user stories, dataset simulado (20 registros), arquitetura da solução. |
 | Sprint 2 | Fase 4 | Implementação técnica: banco SQLite, ETL, modelo Random Forest treinado, dashboard Streamlit, métricas de avaliação. |
-| **Sprint 3** | **Fase 5** | **Integração dos módulos em MVP funcional (~60%): backend orquestrador, APIs REST, segurança (JWT + bcrypt + RBAC), simulador de telemetria e fluxo contínuo ponta a ponta.** |
+| Sprint 3 | Fase 5 | Integração dos módulos em MVP funcional: backend orquestrador, APIs REST, segurança (JWT + bcrypt + RBAC), simulador de telemetria e fluxo contínuo ponta a ponta. |
+| **Sprint 4** | **Fase 6** | **Consolidação do MVP integrado: correções do feedback da tutoria, ETL/banco íntegros, score de risco contínuo com fatores reais, relatórios por perfil, testes de ponta a ponta e entrega documentada.** |
 
 Repositórios anteriores:
 - Sprint 1: [challenger-sprint-1](https://github.com/HenriqueSanchesSilva/challenger-sprint-1)
 - Sprint 2: [fase-4-challange](https://github.com/zjpza/fase-4-challange)
+- Sprint 3: [fase-5-sprint-3](https://github.com/zjpza/fase-5-sprint-3)
 
 ---
 
@@ -158,6 +162,7 @@ fase6-sprint4/
 └── assets/                            # Diagrama de arquitetura (Mermaid + PNG)
     ├── diagrama_arquitetura.mmd      # Fonte Mermaid editável
     └── diagrama_arquitetura.png      # Imagem renderizada
+```
 
 ---
 
@@ -343,7 +348,7 @@ Os testes usam `TestClient` (FastAPI) em processo — não exigem API rodando. O
 
 ## 🎥 Apresentação em Vídeo
 
-> 🎥 **[Vídeo da Sprint 3 — fluxo integrado ponta a ponta](https://youtu.be/COLE_O_LINK_AQUI)** *(não listado no YouTube)*
+> 🎥 **[Vídeo da Sprint 4 — fluxo integrado ponta a ponta](https://youtu.be/COLE_O_LINK_AQUI)** *(não listado no YouTube)*
 
 ---
 
