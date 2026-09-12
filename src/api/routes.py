@@ -293,7 +293,9 @@ def receber_telemetria(
             ip_origem=_get_client_ip(request),
         )
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            # 422 literal: `status.HTTP_422_UNPROCESSABLE_ENTITY` está deprecado na versão
+            # instalada do Starlette (aviso na suite) e o nome novo só existe a partir dela.
+            status_code=422,
             detail=f"Equipamento {payload.id_equipamento} não cadastrado",
         )
     predictor = request.app.state.predictor

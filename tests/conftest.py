@@ -1,11 +1,16 @@
 """Fixtures compartilhadas: banco SQLite temporário + TestClient com override de get_db."""
 from __future__ import annotations
 
+import os
 import sqlite3
 import sys
 from pathlib import Path
 
 import pytest
+
+# Segredo fixo para a suite: sem isso cada import gera um segredo aleatório e o aviso
+# correspondente, e os testes de token ficariam dependentes de um valor volátil.
+os.environ.setdefault("JWT_SECRET_KEY", "segredo-de-teste-com-mais-de-32-bytes-ok")
 
 # Reproduz o bootstrap de PYTHONPATH de start_api.py: adiciona src/ para que
 # `from api...`, `from security...` e `from ml...` resolvam.

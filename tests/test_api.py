@@ -379,6 +379,36 @@ def test_segredo_nao_fica_embutido_no_codigo():
     assert len(SECRET_KEY) >= 32
 
 
+def test_sem_env_a_api_gera_segredo_efemero(tmp_path):
+    """Processo sem JWT_SECRET_KEY: segredo aleatório de 32+ bytes e aviso no log (B10)."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    raiz = Path(__file__).resolve().parents[1]
+    ambiente = {"PATH": str(Path(sys.executable).parent), "SYSTEMROOT": "C:/Windows"}
+    codigo = "\n".join(
+        [
+            "import sys, warnings",
+            "sys.path.insert(0, 'src')",
+            "with warnings.catch_warnings(record=True) as avisos:",
+            "    warnings.simplefilter('always')",
+            "    import security.auth as auth",
+            "    print(len(auth.SECRET_KEY), auth.SECRET_KEY != 'agrorisk-dev-secret-change-me-32b',",
+            "          any('JWT_SECRET_KEY' in str(w.message) for w in avisos))",
+        ]
+    )
+    resultado = subprocess.run(
+        [sys.executable, "-c", codigo], cwd=raiz, env=ambiente, capture_output=True, text=True
+    )
+
+    assert resultado.returncode == 0, resultado.stderr
+    tamanho, diferente_do_default, avisou = resultado.stdout.split()
+    assert int(tamanho) >= 32
+    assert diferente_do_default == "True"
+    assert avisou == "True"
+
+
 def test_identificador_com_sql_nao_afeta_o_banco(client, db):
     """Entrada maliciosa em campo identificador é recusada pela validação, sem tocar o schema."""
     token = _login(client, *GESTOR)
