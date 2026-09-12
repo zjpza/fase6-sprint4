@@ -165,7 +165,8 @@ fase6-sprint4/
 │   ├── auditoria-sprint4.md          # Diagnóstico da base importada (issue #1)
 │   ├── etl-consistencia.md           # Evidências de consistência do ETL (issue #3)
 │   ├── ml-score-e-fatores.md         # Score contínuo e fatores do modelo (issue #4)
-│   └── integracao-coleta.md          # Confiabilidade da coleta de telemetria (issue #5)
+│   ├── integracao-coleta.md          # Confiabilidade da coleta de telemetria (issue #5)
+│   └── seguranca-auditoria.md        # Segredo, tokens e trilha de auditoria (issue #6)
 └── assets/                            # Diagrama de arquitetura (Mermaid + PNG)
     ├── diagrama_arquitetura.mmd      # Fonte Mermaid editável
     └── diagrama_arquitetura.png      # Imagem renderizada
@@ -213,8 +214,16 @@ pip install -r requirements.txt
 
 ### Variáveis de ambiente (opcional)
 
-O `JWT_SECRET_KEY` tem um valor padrão de desenvolvimento embutido no código.
-Para produção, defina via variável de ambiente antes de iniciar a API:
+Sem `JWT_SECRET_KEY`, a API gera um **segredo aleatório por processo** (tokens deixam de valer
+ao reiniciar) — não existe segredo embutido no código. Para tokens estáveis, crie um `.env` a
+partir do `.env.example`:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"   # gere o segredo
+cp .env.example .env                                            # e cole o valor em JWT_SECRET_KEY
+```
+
+Ou defina direto no ambiente antes de iniciar a API:
 
 ```bash
 # Linux/Mac
@@ -306,6 +315,7 @@ Fluxo: POST `/login` → token JWT → POST `/telemetria` por registro → impri
 | GET | `/api/v1/equipamentos` | Lista frota completa | JWT |
 | GET | `/api/v1/equipamentos/{id}/risco` | Risco atual do equipamento | JWT |
 | GET | `/api/v1/alertas` | Alertas recentes (filtrado por equipamento para Operador) | JWT |
+| GET | `/api/v1/auditoria` | Trilha de auditoria com decisões do sistema (`limit` 1-1000, filtro por `acao`) | JWT (Gestor/Analista) |
 | GET | `/api/v1/telemetria` | Histórico de telemetria com predições e fatores do modelo (filtrado por equipamento para Operador; `limit` 1-1000) | JWT |
 | GET | `/api/v1/resumo-frota` | Resumo de risco por equipamento (view `vw_resumo_risco_equipamento`) | JWT |
 
@@ -347,7 +357,7 @@ python -m pytest tests/ -v
 |---------|-----------|
 | `tests/conftest.py` | Fixtures: banco SQLite temporário por teste, override de `get_db`, `TestClient` com `RiskPredictor` |
 | `tests/test_unit.py` | `faixa_proximidade`, `classificar_risco`, `score_regra`, `score_continuo` (ponderado pelas probabilidades), `_calcular_features`, inferência do modelo (fatores por contribuição e continuidade do score) |
-| `tests/test_api.py` | Login (200/401), `/me`, POST `/telemetria` (201/401/403/409/422), RBAC por papel, coleta reenviada sem duplicar, rajada com consistência de totais, payload malformado sem gravação parcial, GET `/telemetria` com filtragem e validação de `limit`, `/equipamentos`, `/alertas`, `/health` |
+| `tests/test_api.py` | Login (200/401), `/me`, POST `/telemetria` (201/401/403/409/422), RBAC por papel, coleta reenviada sem duplicar, rajada com consistência de totais, payload malformado sem gravação parcial, token expirado/forjado, injeção no identificador, GET `/telemetria` com filtragem e validação de `limit`, `/auditoria` com RBAC e filtro por ação, `/equipamentos`, `/alertas`, `/health` |
 | `tests/test_etl.py` | Carga idempotente (recarga não duplica nem insere 0), higienização por motivo (faltante, duplicado, domínio, faixa, incoerência), rastreabilidade `fonte`/`id_coleta`, migração de base legada |
 
 Os testes usam `TestClient` (FastAPI) em processo — não exigem API rodando. O banco é recriado em arquivo temporário a cada teste, garantindo isolamento.
@@ -359,7 +369,7 @@ Os testes usam `TestClient` (FastAPI) em processo — não exigem API rodando. O
 - **Autenticação**: JWT (HS256) com expiração de 60 minutos. Senhas armazenadas como hash bcrypt na tabela `usuarios` (nunca em texto puro). Secret do JWT configurável via variável de ambiente `JWT_SECRET_KEY`.
 - **Autorização (RBAC)**: papéis `Operador`, `GestorFrota` e `AnalistaSeguradora` com verificações centralizadas em `src/security/rbac.py`. O endpoint `POST /telemetria` exige `Operador` ou `GestorFrota`; `AnalistaSeguradora` recebe 403. Operadores só podem enviar telemetria para seu próprio equipamento.
 - **Integridade**: triggers SQL garantem consistência entre `nivel_risco` e `alerta_gerado`; `CHECK` constraints validam domínios; `FOREIGN KEY` com `PRAGMA foreign_keys = ON`.
-- **Auditoria**: tabela `auditoria` registra todas as chamadas à API (login, telemetria, consultas) com usuário, ação, recurso, IP e timestamp.
+- **Auditoria**: tabela `auditoria` registra chamadas à API (login, telemetria, consultas) **e as decisões do sistema** (`decisao_risco` com score da regra, score do modelo, alerta e fatores), com usuário, ação, recurso, IP e timestamp. A trilha é consultável por Gestor/Analista em `GET /api/v1/auditoria`.
 - **Validação**: modelos Pydantic com `Field(..., ge=, le=, pattern=)` sanitizam e validam entradas antes da persistência.
 - **Dashboard**: o dashboard Streamlit exige login JWT para acessar qualquer visão. O papel do usuário autenticado determina a visão exibida (Operador, Gestor ou Analista) — não há seleção manual de persona.
 
