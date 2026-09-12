@@ -15,6 +15,11 @@ CREATE TABLE IF NOT EXISTS equipamentos (
 -- Leituras históricas de telemetria e features geradas pelo ETL.
 CREATE TABLE IF NOT EXISTS telemetria (
     id_registro INTEGER PRIMARY KEY,
+    -- Rastreabilidade até a fonte: 'api' para a coleta em tempo real (id_coleta NULL,
+    -- sem id de origem), 'dataset_simulado' para a carga do ETL (id_coleta = id_registro
+    -- da planilha) e 'legado' para linhas anteriores a esta estrutura.
+    fonte TEXT NOT NULL DEFAULT 'api',
+    id_coleta INTEGER,
     id_equipamento TEXT NOT NULL,
     data_hora TIMESTAMP NOT NULL,
     latitude REAL,
@@ -49,7 +54,9 @@ CREATE TABLE IF NOT EXISTS telemetria (
     score_risco_calculado INTEGER,
     diff_score REAL,
     data_ingestao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (id_equipamento) REFERENCES equipamentos(id_equipamento)
+    FOREIGN KEY (id_equipamento) REFERENCES equipamentos(id_equipamento),
+    -- Uma mesma coleta da mesma fonte entra uma única vez: recarregar é idempotente.
+    UNIQUE (fonte, id_coleta)
 );
 
 -- Predições de modelos de ML para auditoria posterior.

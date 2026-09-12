@@ -7,7 +7,6 @@ Executável de duas formas, a partir da raiz do projeto:
 from __future__ import annotations
 
 import sqlite3
-import subprocess
 import sys
 from pathlib import Path
 
@@ -19,8 +18,10 @@ SRC = Path(__file__).resolve().parents[1]
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from data.conexao import conectar  # noqa: E402
 from data.feature_engineering import OUTPUT_PATH, RAW_PATH, criar_features, salvar_scaler, validar_features  # noqa: E402
 from data.generate_dataset import OUTPUT_PATH as RAW_OUTPUT, gerar_dataset  # noqa: E402
+from data.load_to_sql import TABLE_NAME, ResultadoCarga, carregar_dados, contar_registros  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = ROOT / "sompo.db"
@@ -35,15 +36,37 @@ SQL_FILES = [
 
 def executar_schema() -> None:
     """Cria/atualiza o banco de dados executando os arquivos SQL na ordem."""
-    conn = sqlite3.connect(DB_PATH)
-    for sql_file in SQL_FILES:
-        if not sql_file.exists():
-            raise FileNotFoundError(f"Arquivo SQL não encontrado: {sql_file}")
-        with sql_file.open("r", encoding="utf-8") as file:
-            conn.executescript(file.read())
-    conn.commit()
-    conn.close()
+    with conectar(DB_PATH) as conn:
+        # Antes dos arquivos SQL: as bases antigas precisam das colunas de
+        # rastreabilidade para os índices do schema novo aplicarem.
+        atualizar_schema_legado(conn)
+        for sql_file in SQL_FILES:
+            if not sql_file.exists():
+                raise FileNotFoundError(f"Arquivo SQL não encontrado: {sql_file}")
+            conn.executescript(sql_file.read_text(encoding="utf-8"))
+        conn.commit()
     print(f"[OK] Schema executado em {DB_PATH}")
+
+
+def atualizar_schema_legado(conn: sqlite3.Connection) -> None:
+    """Adiciona as colunas de rastreabilidade em bases criadas antes da Sprint 4.
+
+    `CREATE TABLE IF NOT EXISTS` não altera tabela existente: sem esta migração,
+    um `sompo.db` antigo ficaria sem `fonte`/`id_coleta` e a carga voltaria a
+    perder a origem dos registros.
+    """
+    colunas = {coluna[1] for coluna in conn.execute(f"PRAGMA table_info({TABLE_NAME})")}
+    if not colunas or "id_coleta" in colunas:
+        return
+    # As linhas que já existiam vêm de base anterior à rastreabilidade: rotulá-las
+    # como 'api' (default do schema) inventaria procedência. Quem escreve agora
+    # (API e ETL) informa a fonte explicitamente.
+    conn.execute(f"ALTER TABLE {TABLE_NAME} ADD COLUMN fonte TEXT NOT NULL DEFAULT 'legado'")
+    conn.execute(f"ALTER TABLE {TABLE_NAME} ADD COLUMN id_coleta INTEGER")
+    conn.execute(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS idx_telemetria_rastreabilidade ON {TABLE_NAME}(fonte, id_coleta)"
+    )
+    print(f"[OK] Colunas de rastreabilidade adicionadas em {TABLE_NAME}")
 
 
 def gerar_dados_brutos(n_registros: int = 1000) -> pd.DataFrame:
@@ -76,20 +99,11 @@ def processar_features() -> pd.DataFrame:
     return df_features
 
 
-def carregar_banco() -> int:
-    """Carrega os dados processados no banco via script existente."""
-    load_script = Path(__file__).resolve().parent / "load_to_sql.py"
-    result = subprocess.run(
-        [sys.executable, str(load_script)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    print(result.stdout)
-    if result.returncode != 0:
-        print(result.stderr)
-        raise RuntimeError("Falha ao carregar dados no banco")
-    return 0
+def carregar_banco() -> ResultadoCarga:
+    """Carrega os dados processados no banco e devolve o resultado da carga."""
+    resultado = carregar_dados()
+    print(f"[OK] Carga: {resultado.resumo()}")
+    return resultado
 
 
 def run_pipeline(n_registros: int = 1000) -> None:
@@ -98,7 +112,7 @@ def run_pipeline(n_registros: int = 1000) -> None:
     gerar_dados_brutos(n_registros)
     processar_features()
     carregar_banco()
-    print("[OK] Pipeline concluído com sucesso.")
+    print(f"[OK] Pipeline concluído com sucesso ({contar_registros()} registros em {TABLE_NAME}).")
 
 
 if __name__ == "__main__":

@@ -18,6 +18,9 @@ from ml.features import (
 from ml.predictor import RiskPredictor
 from ml.recomendacao import recomendar
 
+# Identifica no banco que o registro veio da coleta ao vivo (não da carga do ETL).
+FONTE_API = "api"
+
 
 def _inserir_telemetria(conn: sqlite3.Connection, dados: dict) -> int:
     colunas = [
@@ -56,6 +59,9 @@ def _inserir_telemetria(conn: sqlite3.Connection, dados: dict) -> int:
         "diff_score",
     ]
     valores = [dados.get(col) for col in colunas]
+    # Procedência explícita: a coleta ao vivo não tem id de origem (id_coleta fica NULL).
+    colunas.append("fonte")
+    valores.append(FONTE_API)
     placeholders = ", ".join(["?"] * len(colunas))
     sql = f"INSERT INTO telemetria ({', '.join(colunas)}) VALUES ({placeholders})"
     cursor = conn.cursor()

@@ -4,16 +4,19 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from data.conexao import conectar
+
 ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = ROOT / "sompo.db"
 
 
 def get_connection() -> sqlite3.Connection:
-    """Abre uma conexão com rows nomeadas (sqlite3.Row) e FKs habilitadas."""
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    """Abre uma conexão com rows nomeadas, FKs habilitadas e espera por lock.
+
+    Mesma política de conexão do ETL (`data.conexao`): sem o `busy_timeout`
+    uma escrita concorrente (API + carga do ETL) falharia na hora.
+    """
+    return conectar(DB_PATH, check_same_thread=False)
 
 
 def get_db() -> sqlite3.Connection:
