@@ -1,77 +1,75 @@
-%% AgroRisk AI - Arquitetura Sprint 3 (Fase 5)
-%% Reflete o pipeline integrado: simulacao -> ETL -> FastAPI -> SQLite -> ML -> dashboard, com seguranca JWT/RBAC/auditoria.
+%% AgroRisk AI - Arquitetura entregue na Sprint 4 (Fase 6)
+%% Reflete o que roda de fato: coleta simulada -> ETL higienizado e rastreavel -> FastAPI -> SQLite -> modelo -> dashboard,
+%% com seguranca JWT/RBAC e trilha de auditoria das decisoes.
 flowchart TB
-    subgraph S1["1 - Simulacao de Dados"]
-        GEN["generate_dataset.py<br/>simulador de sensores e telemetria"]
-        RAW["data/raw/dataset_simulado.csv<br/>1000 registros"]
-        GEN --> RAW
+    subgraph S1["1 - Coleta de dados"]
+        GEN["generate_dataset.py<br/>dataset deterministico (SEED=42)"]
+        RAW["data/raw/dataset_simulado.csv"]
+        SIM["simulador_telemetria.py<br/>retry 3x · --lote · --equipamento"]
+        GEN --> RAW --> SIM
     end
 
     subgraph S2["2 - ETL / Feature Engineering"]
-        FE["feature_engineering.py<br/>pandas - features de risco + MinMaxScaler"]
-        ART["scaler.pkl · label_encoders.pkl"]
+        FE["feature_engineering.py<br/>features de risco + validacao (ValueError descritivo)"]
+        ART["scaler.pkl · label_encoders.pkl<br/>(artefatos gerados, fora do versionamento)"]
         PROC["data/processed/features.csv"]
-        LOAD["load_to_sql.py<br/>ingestao no banco"]
+        HIG["validacao_dados.py<br/>higienizacao: faltante · duplicado · dominio · faixa · incoerencia"]
+        LOAD["load_to_sql.py<br/>carga idempotente (fonte + id_coleta)"]
         FE --> ART
-        FE --> PROC --> LOAD
+        FE --> PROC --> HIG --> LOAD
     end
 
     subgraph S3["3 - Backend FastAPI"]
-        SIM["simulador_telemetria.py<br/>POST /login -> JWT -> POST /telemetria"]
-        MAIN["main.py<br/>lifespan: RiskPredictor singleton"]
-        ROUTES["routes.py<br/>login · telemetria · equipamentos · alertas"]
-        SVC["telemetria_service.py<br/>features -> score -> predicao -> alerta"]
+        ROUTES["routes.py<br/>login · telemetria · equipamentos · alertas · auditoria"]
+        SVC["telemetria_service.py<br/>features -> score da regra -> predicao -> alerta"]
+        CONEX["data/conexao.py<br/>FKs + busy_timeout compartilhado"]
     end
 
     subgraph S4["4 - Persistencia SQLite"]
-        DB[("7 tabelas: equipamentos · telemetria · scores_modelo · alertas · usuarios · auditoria · regras_risco + 4 views")]
+        DB[("equipamentos · telemetria · scores_modelo · alertas · usuarios · auditoria · regras_risco<br/>+ views · UNIQUE(fonte,id_coleta) · gatilho de consistencia")]
     end
 
     subgraph S5["5 - Inteligencia scikit-learn"]
-        TRAIN["02_modelagem.ipynb<br/>treino Random Forest (cv k=5)"]
-        MODEL["models/risk_model.pkl"]
-        EVAL["03_avaliacao.ipynb<br/>matriz de confusao · F1 · feature importance"]
-        PRED["predictor.py<br/>inferencia (singleton na API)"]
+        TRAIN["ml/train_model.py<br/>revisao de features por CV + treino final"]
+        MODEL["models/risk_model.pkl<br/>Random Forest · 11 features"]
+        METRICS["ml/relatorio_metricas.md<br/>acuracia 0.835 · AUC 0.963"]
+        PRED["ml/predictor.py<br/>score continuo + fatores por contribuicao"]
         TRAIN --> MODEL --> PRED
-        TRAIN --> EVAL
+        TRAIN --> METRICS
     end
 
-    subgraph S6["6 - Seguranca"]
-        AUTH["auth.py<br/>JWT HS256 · bcrypt · get_current_user"]
-        RBAC["rbac.py<br/>require_operador_or_gestor"]
-        AUDIT["audit_logger.py<br/>tabela auditoria"]
+    subgraph S6["6 - Seguranca e auditoria"]
+        AUTH["security/auth.py<br/>JWT HS256 · segredo por env (efemero sem env)"]
+        RBAC["security/rbac.py<br/>RBAC por papel (operador · gestor · analista)"]
+        AUDIT["security/audit_logger.py<br/>acesso + decisao_risco (scores, alerta, fatores)"]
     end
 
-    subgraph S7["7 - Visualizacao Streamlit"]
-        APP["app.py<br/>login JWT · visoes por papel do token<br/>mapa · alertas · historico · exportacao"]
+    subgraph S7["7 - Dashboard Streamlit"]
+        APP["dashboard/app.py<br/>visoes por papel do token<br/>mapa · tendencias por regiao/operacao · criterios<br/>score regra x modelo · fatores · trilha · CSV"]
     end
 
-    subgraph S8["8 - Usuarios"]
-        U1["Operador"]
-        U2["Gestor de Frota"]
-        U3["Analista da Seguradora"]
+    subgraph S8["8 - Personas"]
+        U1["Operador (US-01)"]
+        U2["Gestor de Frota (US-04)"]
+        U3["Analista da Seguradora (US-07)"]
     end
 
-    RAW --> FE
-    LOAD --> DB
-    SIM -->|POST /login| ROUTES
-    SIM -->|POST /telemetria| ROUTES
-    MAIN --> ROUTES
+    SIM -->|POST /telemetria + id_coleta| ROUTES
     ROUTES --> SVC
-    SVC --> DB
+    SVC -->|registro + score + predicao| DB
     SVC --> PRED
-    PRED --> DB
-    DB -->|GET /telemetria JWT| APP
-    DB -->|GET /alertas JWT| APP
-    DB -->|GET /equipamentos JWT| APP
+    CONEX -.-> DB
+    LOAD -->|carga tratada| DB
+    DB -->|GET com JWT| APP
     AUTH -.-> ROUTES
     RBAC -.-> ROUTES
     AUDIT -.-> DB
     APP --> U1
     APP --> U2
     APP --> U3
+    AUDIT -.->|GET /auditoria| APP
 
-    classDef sim fill:#7a1fa2,stroke:#fff,color:#fff
+    classDef coleta fill:#7a1fa2,stroke:#fff,color:#fff
     classDef etl fill:#1f6feb,stroke:#fff,color:#fff
     classDef backend fill:#1f6feb,stroke:#fff,color:#fff
     classDef db fill:#0e8a6b,stroke:#fff,color:#fff
@@ -80,11 +78,11 @@ flowchart TB
     classDef viz fill:#e6007e,stroke:#fff,color:#fff
     classDef user fill:#444c5c,stroke:#fff,color:#fff
 
-    class GEN,RAW sim
-    class FE,ART,PROC,LOAD etl
-    class SIM,MAIN,ROUTES,SVC backend
+    class GEN,RAW,SIM coleta
+    class FE,ART,PROC,HIG,LOAD etl
+    class ROUTES,SVC,CONEX backend
     class DB db
-    class TRAIN,MODEL,EVAL,PRED ml
+    class TRAIN,MODEL,METRICS,PRED ml
     class AUTH,RBAC,AUDIT sec
     class APP viz
     class U1,U2,U3 user

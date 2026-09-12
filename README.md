@@ -76,31 +76,33 @@ Repositórios anteriores:
 
 ## 🏗️ Arquitetura da Solução
 
-O pipeline integrado desta Sprint segue o fluxo:
+Fluxo entregue: **coleta → ETL higienizado e rastreável → API → banco → modelo → score/alerta →
+dashboard**, com segurança e auditoria atravessando tudo.
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────┐     ┌─────────────────┐
-│ Fontes de Dados  │────▶│  Backend Python  │────▶│  Modelo ML  │     │  Dashboard /    │
-│ (simulador ou   │     │  (FastAPI +      │     │  Random     │────▶│  Relatório     │
-│  pipeline_client)│     │  segurança JWT) │     │  Forest     │     │  (Streamlit)   │
-└─────────────────┘     └──────────────────┘     └─────────────┘     └─────────────────┘
-                                │                        ▲                  │
-                                ▼                        │                  │
-                        ┌───────────────┐               │                  │
-                        │ Banco SQLite  │               └──────────────────┘
-                        │ + Auditoria   │     GET /telemetria, /alertas, /equipamentos
-                        └───────────────┘                  (JWT Bearer)
+generate_dataset / simulador  →  feature_engineering  →  validacao_dados  →  load_to_sql
+       (coleta)                       (features)          (higienização)     (carga idempotente)
+                                                                                  │
+                                                                                  ▼
+   dashboard  ←  GET com JWT  ←  FastAPI (routes + telemetria_service)  ←→  SQLite (+ auditoria)
+       │                              ▲            │
+       │                              │            ▼
+       └── trilha de auditoria ───────┘      predictor (score contínuo + fatores)
 ```
 
 ![Diagrama de Arquitetura](assets/diagrama_arquitetura.png)
 
+> Fonte editável do diagrama: [`assets/diagrama_arquitetura.mmd`](assets/diagrama_arquitetura.mmd)
+> (renderize em mermaid.live ou com `mermaid-cli`).
+
 Camadas:
-1. **Entrada de dados**: `simulador_telemetria.py` gera registros sintéticos determinísticos (SEED=42) via `gerar_dataset` e envia em fluxo contínuo à API; `pipeline_client.py` demonstra o caso simples com um registro.
-2. **Backend orquestrador**: FastAPI que valida entradas (Pydantic), persiste em SQLite, aciona o modelo preditivo e registra auditoria.
-3. **Banco de dados**: SQLite relacional com tabelas de telemetria, equipamentos, scores_modelo, alertas, usuários (senhas bcrypt) e auditoria.
-4. **Modelo preditivo**: Random Forest treinado na Sprint 2, carregado uma vez na inicialização via `lifespan` (singleton) e reutilizado em todas as requisições. Devolve score 0-100 contínuo (média das faixas ponderada pelas probabilidades) e os fatores que pesaram naquele registro — mesma escala do score da regra, então os dois são comparáveis.
-5. **Interface**: dashboard Streamlit que consome a API REST via JWT (login obrigatório). A visão é derivada do papel do usuário autenticado: Gestor de Frota vê mapa e frota completa, Operador vê apenas seu equipamento (com score da regra, score do modelo e os fatores que pesaram na predição), Analista vê histórico auditável de alertas com exportação CSV.
-6. **Segurança**: autenticação JWT com senhas bcrypt, RBAC centralizado em `rbac.py`, validação de entradas, triggers SQL de integridade e logs de auditoria.
+1. **Entrada de dados**: `simulador_telemetria.py` gera registros sintéticos determinísticos (SEED=42) via `gerar_dataset` e envia em fluxo contínuo à API, com retry em falha transitória e resumo da execução; `pipeline_client.py` demonstra o caso simples com um registro.
+2. **ETL**: `feature_engineering.py` deriva as features de risco, `validacao_dados.py` higieniza (faltante, duplicado, domínio, faixa, incoerência) e `load_to_sql.py` carrega de forma idempotente, guardando `fonte` + `id_coleta` de cada registro.
+3. **Backend orquestrador**: FastAPI que valida entradas (Pydantic), persiste em SQLite via conexão com `busy_timeout`, aciona o modelo preditivo e registra auditoria — inclusive da decisão tomada.
+4. **Banco de dados**: SQLite relacional com telemetria (rastreável até a origem), equipamentos, scores_modelo, alertas, usuários (senhas bcrypt) e auditoria, com `CHECK`, `FOREIGN KEY` e gatilho de consistência.
+5. **Modelo preditivo**: Random Forest (11 features, revisadas por cross-validation no `train_model.py`) carregado uma vez na inicialização via `lifespan`. Devolve score 0-100 contínuo (média das faixas ponderada pelas probabilidades) e os fatores que pesaram naquele registro — mesma escala do score da regra, então os dois são comparáveis.
+6. **Interface**: dashboard Streamlit que consome a API REST via JWT. A visão é derivada do papel do usuário autenticado: Gestor de Frota vê mapa, tendências por região/operação e critérios; Operador vê seu equipamento com score da regra × score do modelo e os fatores; Analista vê o histórico auditável de alertas e a trilha de auditoria, com exportação CSV.
+7. **Segurança**: JWT HS256 com expiração validada, senhas bcrypt, RBAC centralizado em `rbac.py`, validação de entradas, triggers SQL de integridade e trilha de auditoria consultável.
 
 ---
 
@@ -169,7 +171,8 @@ fase6-sprint4/
 │   ├── integracao-coleta.md          # Confiabilidade da coleta de telemetria (issue #5)
 │   ├── seguranca-auditoria.md        # Segredo, tokens e trilha de auditoria (issue #6)
 │   ├── dashboard-relatorios.md       # Critérios, personas e prints das visões (issue #7)
-│   └── evidencias-mvp.md             # Suite, execução demonstrativa e User Stories (issue #8)
+│   ├── evidencias-mvp.md             # Suite, execução demonstrativa e User Stories (issue #8)
+│   └── roteiro-video.md              # Roteiro cena a cena do vídeo de entrega (issue #9)
 └── assets/                            # Diagrama de arquitetura e prints das telas
     ├── diagrama_arquitetura.mmd      # Fonte Mermaid editável
     ├── diagrama_arquitetura.png      # Imagem renderizada
@@ -380,13 +383,34 @@ Os testes usam `TestClient` (FastAPI) em processo — não exigem API rodando. O
 
 ---
 
+## 🧭 Decisões Técnicas
+
+| Decisão | Por que | Onde está a evidência |
+|---|---|---|
+| **Repo da sprint 4 nasce da base da sprint 3** (não é recomeço) | Consolidar o MVP, não refazer | commit base `eb399fc` |
+| **Rastreabilidade por `fonte` + `id_coleta`** em vez de usar a PK da planilha | A carga colidia com as PKs e inseria 0 registros reportando sucesso (achado B2) | [`docs/etl-consistencia.md`](docs/etl-consistencia.md) |
+| **`INSERT` puro, sem `INSERT OR IGNORE`** | O `OR IGNORE` engolia qualquer violação (não só duplicidade) e transformava linha ruim em sucesso silencioso | [`docs/etl-consistencia.md`](docs/etl-consistencia.md) |
+| **Higienização antes do consumo**, com motivo por descarte | O modelo precisa de dados íntegros; o descarte precisa ser auditável, não invisível | `src/data/validacao_dados.py` |
+| **Score contínuo = esperança das probabilidades**, na mesma escala da regra | O score fixo por classe nivelava registros diferentes; manter a mesma escala torna regra × modelo comparáveis | [`docs/ml-score-e-fatores.md`](docs/ml-score-e-fatores.md) |
+| **Fatores por perturbação local**, não SHAP | Mede a contribuição real no registro; SHAP adicionaria dependência pesada sem mudar a decisão do operador | `src/ml/predictor.py`, testes em `tests/test_unit.py` |
+| **Retreino com revisão de features por cross-validation** | Cortar variáveis redundantes com número, não com intuição (11 features vs 13) | [`src/ml/relatorio_metricas.md`](src/ml/relatorio_metricas.md) |
+| **Retry com backoff no coletor e 409 para coleta repetida** | Coleta de campo tem falha de rede e reenvio; nada pode entrar sem score ou duplicado | [`docs/integracao-coleta.md`](docs/integracao-coleta.md) |
+| **Segredo JWT por env com fallback efêmero** (nada de constante no código) | Eliminar credencial versionada (achado B10) sem impedir a demonstração | [`docs/seguranca-auditoria.md`](docs/seguranca-auditoria.md) |
+| **Auditoria registra decisão, não só acesso** | A pergunta de auditoria é "o que o sistema decidiu e por quê", não apenas "quem entrou" | `GET /api/v1/auditoria` |
+| **Mapa com `scatter_geo`** em vez de tiles de rua | Tiles externos + WebGL deixavam o mapa em branco em print/navegador sem WebGL | [`docs/dashboard-relatorios.md`](docs/dashboard-relatorios.md) |
+| **`sompo.db` fora do versionamento** | Banco é artefato gerado; o ETL é o passo reproduzível | [`docs/evidencias-mvp.md`](docs/evidencias-mvp.md) |
+
+---
+
 ## 📊 User Stories Atendidas
 
-| ID | Persona | User Story |
-|----|---------|-----------|
-| US-01 | Operador | Receber alerta visual antes de entrar em área de alto risco. |
-| US-04 | Gestora | Visualizar em mapa o status de risco de cada equipamento. |
-| US-07 | Analista | Acessar histórico de alertas emitidos antes de um sinistro. |
+| ID | Persona | User Story | Como o MVP atende | Evidência |
+|----|---------|-----------|-------------------|-----------|
+| US-01 | Operador | Receber alerta visual antes de entrar em área de alto risco. | Alerta na tela com nível, score da regra × score do modelo e **fatores que pesaram**, gerado no POST e persistido na tabela `alertas` | `assets/prints/02-operador-campo.png` |
+| US-04 | Gestora | Visualizar em mapa o status de risco de cada equipamento. | Mapa com pontos por nível, KPIs da frota e tendências por região/tipo de operação | `assets/prints/01-gestor-frota.png` |
+| US-07 | Analista | Acessar histórico de alertas emitidos antes de um sinistro. | Histórico auditável de alertas com CSV + trilha de auditoria das decisões | `assets/prints/03-analista-seguradora.png` |
+
+Detalhamento das evidências por issue: [`docs/evidencias-mvp.md`](docs/evidencias-mvp.md).
 
 ---
 
@@ -408,6 +432,9 @@ continua sendo o formulário normal.
 ## 🎥 Apresentação em Vídeo
 
 > 🎥 **[Vídeo da Sprint 4 — fluxo integrado ponta a ponta](https://youtu.be/COLE_O_LINK_AQUI)** *(não listado no YouTube)*
+
+Roteiro cena a cena, com os comandos e o que mostrar em cada momento:
+[`docs/roteiro-video.md`](docs/roteiro-video.md).
 
 ---
 
